@@ -1,0 +1,343 @@
+
+
+
+
+
+오라클 클라우드 서버
+
+Username : opc
+158.180.75.114
+
+/Users/ssi/Desktop/scrapping/key/ssh-key-2025-02-27.key
+
+
+ssh -i /Users/ssi/Desktop/scrapping/key/ssh-key-2025-02-27.key opc@158.180.75.114
+
+centOS 7.9
+python 3.7.12
+PHP 5.4.16
+aphache 2.4.6
+openSSL 
+
+//ssh 터미널 접속
+ssh opc@158.180.75.114
+
+
+http://158.180.75.114/info.php
+
+
+python3 /var/www/html/scrapping/test.py
+
+python3 /var/www/html/scrapping/script.py
+
+
+curl -X GET http://158.180.75.114/scrapping/get_info.php
+
+curl -X http://158.180.75.114/scrapping/get_info.php?sid=PL005189
+
+
+//동편마을 공영주차장 플러그링크 완속
+PL005189
+
+//동편마을 공영주차장 급속
+ME20A171
+
+
+
+
+도커
+
+# 기존 컨테이너/이미지 제거
+sudo docker stop pyppeteer-service
+sudo docker rm pyppeteer-service
+sudo docker rmi pyppeteer-scraper
+
+# 새 이미지 빌드
+sudo docker build -t pyppeteer-scraper .
+
+# 상주 컨테이너 실행
+sudo docker run -d --name pyppeteer-service pyppeteer-scraper
+
+
+
+
+
+
+
+//실행중인 컨테이너 도커 확인
+docker ps
+
+//정상 종료
+sudo docker stop pyppeteer-service
+
+
+//강제 종료
+sudo docker kill pyppeteer-service
+
+
+
+//빌드된 도커 이미지들 확인
+sudo docker images
+
+
+
+
+
+
+
+1. (status) / (type) / (dateFinishInfo)
+2. (status) / (type) / (dateFinishInfo)
+
+
+
+====================================================================================================
+
+
+
+
+
+
+
+
+
+
+
+//error log
+tail -f /var/log/httpd/error_log
+
+
+
+# 1) 작업 디렉터리로 이동
+cd /var/www/html/scrapping
+
+# 2) 모든 파일 스테이징
+git add .
+
+# 3) 첫 커밋
+git commit -m "Initial commit: 스크래핑 코드 추가"
+
+# 4) 원격 리포지터리 연결
+git remote add origin https://github.com/dlsnf/scrapping.git
+
+# 5) 로컬 master 브랜치를 원격에 올리기
+git push -u origin master
+
+
+
+ssh-keygen -t ed25519 -C "dlsnf@naver.com"
+
+
+
+//save
+docker save pyppeteer-service -o pyppeteer-service.tar
+
+//서버 전송
+scp pyppeteer-service.tar root@hansbuild.cafe24.com:/var/www/html/scrapping/
+
+scp \
+  -oHostKeyAlgorithms=+ssh-rsa \
+  -oPubkeyAcceptedAlgorithms=+ssh-rsa \
+  pyppeteer-service.tar \
+  root@hansbuild.cafe24.com:/var/www/html/scrapping/
+
+
+
+
+//로컬 mac 빌드 및 압축 전송
+
+# 1) Dockerfile 수정(이미 zlib1g-dev 등 추가됨 가정)
+docker build -t pyppeteer-service .
+
+# 2) 이미지 존재 확인
+docker images | grep pyppeteer-service
+
+# 3) 이미지 덤프+압축
+docker save pyppeteer-service:latest | gzip > pyppeteer-service.tar.gz
+ls -lh pyppeteer-service.tar.gz
+tar -tzf pyppeteer-service.tar.gz | head -n 5
+
+
+//서버 전송
+scp \
+  -o HostKeyAlgorithms=+ssh-rsa \
+  -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+  pyppeteer-service.tar.gz \
+  root@hansbuild.cafe24.com:/var/www/html/scrapping/
+
+
+
+
+cd /var/www/html/scrapping
+
+# 1) 이미지 로드
+gunzip -c pyppeteer-service.tar.gz | docker load
+
+//이미지 확인
+docker images | grep pyppeteer-service
+
+
+
+
+
+
+
+//용량 확인
+df -h
+
+
+
+
+
+//도커 빌드
+docker build --no-cache -t pyppeteer-service .
+
+
+# 2) 기존 컨테이너 제거
+docker rm -f pyppeteer-service 2>/dev/null || true
+
+# 3) 새 컨테이너 실행 //백그라운드 실행하는
+docker run -d --name pyppeteer-service pyppeteer-service
+
+
+
+# 4) 실행 확인
+docker ps | grep pyppeteer-service
+
+//테스트 실행
+docker exec -it pyppeteer-service bash
+
+//pip 설치 리스트 
+docker exec -it pyppeteer-service pip list
+
+
+docker exec pyppeteer-service python /app/script.py
+
+//로그 출력
+docker exec pyppeteer-service python /app/script.py --sid PL005189 --log
+
+
+//로그 드라이버 확인
+docker inspect pyppeteer-service | grep LogConfig
+
+
+//로그 보기
+docker logs pyppeteer-service
+
+
+
+
+
+
+
+
+
+
+실행 중이지 않은 컨테이너 정리
+docker container prune
+
+
+
+
+사용하지 않는 이미지 정리
+docker image prune
+
+
+
+사용하지 않는 볼륨 정리
+docker volume prune
+
+
+
+
+
+
+
+
+
+python3 script.py PL005189
+
+
+curl -X GET "http://hansbuild.cafe24.com/scrapping/get_info.php?sid=PL005189"
+
+
+
+/tmp 경로에 아래 파일들 다운로드 받아놨어
+여기부터 다시 설명해줘
+
+kernel-lt-4.4.199-1.el6.elrepo.x86_64.rpm
+kernel-lt-devel-4.4.199-1.el6.elrepo.x86_64.rpm
+
+
+
+나에게는 서버가 있어 centOS 6.10 버전이고 아파치는 2.2.15버전이고 php는 5.3.3 버전이야
+url을 외부에서 호출하면 php가 실행되고 여기서 파이썬 소스를 실행시키는 docker를 호출해서 반환되는 값을 JSON 으로 가져오려고 해
+소스는 다 작성되어 있어 get_info.php, script.py, Dockerfile
+프로젝트 경로는 다음과 같아
+/var/www/html/scrapping
+호출 예시는 다음과 같아
+curl -X GET "https://hansbuild.cafe24.com/scrapping/get_info.php?sid=PL005190"
+현재 docker는 설치가 되어있지 않아 설치부터 빌드 실행하는 방법까지 상세하게 설명해줘
+
+
+
+
+//파이썬 실행 
+
+/usr/bin/python /var/www/html/scrapping/script.py
+
+python3 /var/www/html/scrapping/test.py
+
+python3 /var/www/html/scrapping/script.py
+
+
+python3 /var/www/html/scrapping/script.py 해당 스크립트를 실행하면 JSON 데이터가 반환되 그 결과값은 {"key": "value"} 이거야 그리고 내 서버에 php를 url로 호출하면 위에 말한 파이썬 프로그램이 실행되고 반환되는 값을 반환하는 프로그램을 작성해줘 서버는 centOS 6.1이고 아파치는 2.2.15이고 php는 5.3.3 이고 파이썬은 3.7.12버전 OpenSSL은 1.1.1버전이야
+
+
+run_python.php를 실행하면 아래와 같이 변수 예시가 있고 해당하는 변수들을 JSON 으로 반환해서 화면에 보여줘야해
+스크래핑해온 html 데이터 가이드도 같이 적어줄께 run_python.php 소스 수정해줘
+
+-- 변수 예시
+company_name = "Company Name" # 충전기 업체명
+total_chargers = 2 # 충전기 총 갯수
+used_chargers = 1 # 충전기 사용된 갯수
+remaining_chargers = total_chargers - used_chargers # 충전기 남은 갯수
+address = "Seoul, Gangnam-gu" # 충전기 주소
+chargers_info = [
+    {
+        "type" : "AC"
+        "status" : "사용가능"
+    }, 
+    {
+        "type" : "AC"
+        "status" : "사용가능"
+    }
+] # 충전기 정보
+
+
+
+
+
+-- 스크래핑 해온 html 데이터 중 변수값에 넣을 가이드
+# 제목 title(String)
+id="form" 아래 h4 태그의 아래의 span 태그를 제외한 text값
+
+# 충전기 업체명 company_name(String)
+org_me 클래스의 text값
+
+# 충전기 정보 값 chargers_info(jsonArray)
+type : class="table01" 아래의 tbody태그의 첫번째 td 태그의 text값
+status : class="table01" 아래의 tbody태그의 세번째 td 태그의 class="state" 의 text값
+
+# 충전기 총 갯수 total_chargers(int)
+chargers 값의 갯수
+
+# 충전기 사용된 갯수 used_chargers(int)
+chargers 값의 json 데이터 중에 status값이 "사용가능"이 아닌 것
+
+# 충전기 남은 갯수 remaining_chargers(int)
+충전기 총 갯수 값에서 - 충전기 사용된 갯수
+
+# 충전기 주소 address(String)
+class="table03" 아래 tbody 태그 아래 첫번째 tr 태그의 td 태그의 text 값
+
+
