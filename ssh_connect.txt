@@ -1,26 +1,14 @@
 
 
-nuri
+nuri 33
 
 
-오라클 클라우드 서버
+//서버 정보
 
-Username : opc
-158.180.75.114
-
-/Users/ssi/Desktop/scrapping/key/ssh-key-2025-02-27.key
-
-
-ssh -i /Users/ssi/Desktop/scrapping/key/ssh-key-2025-02-27.key opc@158.180.75.114
-
-centOS 7.9
-python 3.7.12
-PHP 5.4.16
-aphache 2.4.6
-openSSL 
+centOS
 
 //ssh 터미널 접속
-ssh opc@158.180.75.114
+ssh -oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedAlgorithms=+ssh-rsa root@hansbuild.cafe24.com
 
 
 http://158.180.75.114/info.php
