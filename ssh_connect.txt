@@ -1,5 +1,5 @@
 
-
+111
 
 nuri 66
 
@@ -176,16 +176,48 @@ df -h
 
 
 
-
-//도커 빌드
-docker build --no-cache -t pyppeteer-service .
+# 기존 컨테이너/이미지 제거
+sudo docker stop pyppeteer-service
+sudo docker rm pyppeteer-service
+sudo docker rmi pyppeteer-scraper
 
 
 # 2) 기존 컨테이너 제거
 docker rm -f pyppeteer-service 2>/dev/null || true
 
+//도커 빌드
+docker build --no-cache -t pyppeteer-service .
+
 # 3) 새 컨테이너 실행 //백그라운드 실행하는
 docker run -d --name pyppeteer-service pyppeteer-service
+
+도커 실행
+# 2) docker exec 로 컨테이너 내부에서 스크립트 실행
+docker exec pyppeteer-service python /app/script.py --sid PL005189
+
+docker exec -it pyppeteer-service \python /app/script.py --sid PL005189 --log
+
+
+
+
+실행 중이지 않은 컨테이너 정리
+docker container prune
+
+
+사용하지 않는 이미지 정리
+docker image prune
+
+
+사용하지 않는 볼륨 정리
+docker volume prune
+
+
+
+
+
+
+
+
 
 
 
@@ -220,20 +252,6 @@ docker logs pyppeteer-service
 
 
 
-
-실행 중이지 않은 컨테이너 정리
-docker container prune
-
-
-
-
-사용하지 않는 이미지 정리
-docker image prune
-
-
-
-사용하지 않는 볼륨 정리
-docker volume prune
 
 
 

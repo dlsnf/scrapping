@@ -8,6 +8,8 @@ import time
 import json
 import re
 from datetime import datetime
+import pytz
+
 from pyppeteer import launch
 from lxml import html
 
@@ -25,27 +27,31 @@ def log(message: str):
     print(f"[LOG {now}] {message}")
 
 def compute_date_finish_info(date_finish_str: str) -> str:
-    """‘YYYY.MM.DD HH:MM’ 문자열을 받아서 ‘n시간 m분 전 종료’ 반환"""
-    try:
-        finish_dt = datetime.strptime(date_finish_str, "%Y.%m.%d %H:%M")
-        diff = datetime.now() - finish_dt
-        total_min = int(diff.total_seconds() // 60)
-        h, m = divmod(total_min, 60)
-        return f"{h}시간 {m}분 전 종료" if h > 0 else f"{m}분 전 종료"
-    except Exception as e:
-        log(f"compute_date_finish_info 에러: {e}")
+    seoul = pytz.timezone("Asia/Seoul")
+    naive = datetime.strptime(date_finish_str, "%Y.%m.%d %H:%M")
+    finish_dt = seoul.localize(naive)
+    now = datetime.now(seoul)
+    diff = now - finish_dt
+    if diff.total_seconds() < 0:
         return ""
 
+    total_min = int(diff.total_seconds() // 60)
+    h, m = divmod(total_min, 60)
+    if diff.total_seconds() < 60:
+        return "방금 전 종료"
+    return f"{h}시간 {m}분 전 종료" if h > 0 else f"{m}분 전 종료"
+
 def parse_status(status_text: str) -> str:
-    """‘xx분 사용중’ 매칭 시 ‘사용중 (x시간 y분)’ 형태로 변환"""
-    m = re.match(r"(\d+)분\s*사용중", status_text.strip())
+    text = status_text.strip()
+    # 숫자+분 + optional 공백 + '충전중' + optional 아포스트로피
+    m = re.match(r"(\d+)분\s*충전중[’']?", text)
     if m:
         total_min = int(m.group(1))
         h, mm = divmod(total_min, 60)
-        if h > 0:
-            return f"사용중 ({h}시간 {mm}분)"
-        return f"사용중 ({mm}분)"
-    return status_text.strip()
+        if h:
+            return f"충전중 ({h}시간 {mm}분)"
+        return f"충전중 ({mm}분)"
+    return text
 
 async def init_browser():
     """브라우저와 페이지를 전역으로 한 번만 띄우기"""
@@ -135,7 +141,11 @@ async def scrape_data(sid: str):
             # 상태
             state_node = tds[2].xpath('./span[@class="state"]/text()')
             raw_status = state_node[0].strip() if state_node else td_text.split('\n')[0].strip()
-            charger_status = parse_status(raw_status)
+            
+            
+            # — 여기서 raw_status를 로그로 찍어 봅니다 —
+            log(f"[{idx}] raw_status: {raw_status!r}")
+
             # 종료시간
             rdate_node = tds[2].xpath('./span[@class="rdate"]/text()')
             date_finish = (
@@ -143,11 +153,17 @@ async def scrape_data(sid: str):
                 if rdate_node
                 else (td_text.split('\n')[-1].strip() if '\n' in td_text else "")
             )
-            date_finish_info = compute_date_finish_info(date_finish) if date_finish else ""
-
-            # 새로운 조건 추가
-            if "사용중" in charger_status:
-                date_finish_info = ""
+            
+            
+            raw = raw_status  # HTML 에서 뽑아낸 “123분 충전중” 이나 “충전가능” 등
+            # 1) in-progress 여부 먼저 판단
+            if "충전중" in raw or "사용중" in raw:
+                charger_status    = parse_status(raw)  # 상태 문구 포맷만 하고
+                date_finish_info  = ""                  # 날짜 정보는 무조건 빈 문자열
+            else:
+                charger_status    = parse_status(raw)  # 상태 문구 포맷
+                date_finish_info  = compute_date_finish_info(date_finish)
+                
 
             chargers_info.append({
                 "type": charger_type,
@@ -161,7 +177,12 @@ async def scrape_data(sid: str):
             continue
 
     total = len(chargers_info)
-    used = sum(1 for c in chargers_info if "사용가능" not in c["status"])
+    # used = sum(1 for c in chargers_info if "사용가능" not in c["status"])
+    used = sum(
+        1
+        for c in chargers_info
+        if ("사용중" in c["status"]) or ("충전중" in c["status"]) or ("충전불가" in c["status"])
+    )
     remaining = total - used
     log(f"total={total}, used={used}, remaining={remaining}")
 
