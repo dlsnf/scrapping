@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import argparse
-import sys
 import asyncio
 import time
-import json
 import re
 from datetime import datetime
 import pytz
@@ -13,14 +10,12 @@ import pytz
 from pyppeteer import launch
 from lxml import html
 
-# 전역 변수
+# 전역 싱글톤
 browser = None
 page = None
-log_enabled = False
-start_time = None
+log_enabled = False  # 디버그 로그를 터미널 테스트 시에만 켜고 싶으면 app.py에서 True로 세팅하세요
 
 def log(message: str):
-    """사용자 정의 로그만 출력"""
     if not log_enabled:
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -34,7 +29,6 @@ def compute_date_finish_info(date_finish_str: str) -> str:
     diff = now - finish_dt
     if diff.total_seconds() < 0:
         return ""
-
     total_min = int(diff.total_seconds() // 60)
     h, m = divmod(total_min, 60)
     if diff.total_seconds() < 60:
@@ -43,7 +37,6 @@ def compute_date_finish_info(date_finish_str: str) -> str:
 
 def parse_status(status_text: str) -> str:
     text = status_text.strip()
-    # 숫자+분 + optional 공백 + '충전중' + optional 아포스트로피
     m = re.match(r"(\d+)분\s*충전중[’']?", text)
     if m:
         total_min = int(m.group(1))
@@ -54,12 +47,11 @@ def parse_status(status_text: str) -> str:
     return text
 
 async def init_browser():
-    """브라우저와 페이지를 전역으로 한 번만 띄우기"""
     global browser, page
     if browser is None:
         browser = await launch(
             headless=True,
-            dumpio=False,
+            dumpio=True,   # Chromium stderr를 uvicorn 로그로 흘립니다
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
@@ -69,7 +61,7 @@ async def init_browser():
                 "--disable-logging",
                 "--log-level=3",
             ],
-            executablePath="/usr/lib/chromium/chromium"
+            executablePath="/usr/bin/chromium"
         )
         page = await browser.newPage()
         await page.setUserAgent(
@@ -79,55 +71,59 @@ async def init_browser():
         log("브라우저 및 페이지 초기화 완료")
     return page
 
-async def scrape_data(sid: str):
-    global start_time
+async def scrape_data(sid: str) -> dict:
     overall_start = time.time()
-    log(f"scrape_data 시작 (sid={sid})")
+    log(f"▶ scrape_data 시작 (sid={sid})")
     page_inst = await init_browser()
+    log("▶ init_browser 완료")
 
-    # 1) 페이지 로드 + 재시도 (max 2회)
     url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
     html_content = None
     for attempt in range(2):
         try:
-            log(f"페이지 로드 시도 {attempt+1}/2: {url}")
+            log(f"▶ goto 시도 {attempt+1}")
             await page_inst.goto(url, {"waitUntil": "domcontentloaded", "timeout": 5000})
+            log("▶ waitForSelector 전")
             await page_inst.waitForSelector("#form", {"timeout": 2000})
+            log("▶ waitForSelector 완료")
             html_content = await page_inst.content()
             if html_content.strip():
                 break
             raise ValueError("빈 콘텐츠")
         except Exception as e:
-            log(f"로드 에러: {e}")
+            log(f"▶ 페이지 로드 에러 시도 {attempt+1}: {e}")
             if attempt < 1:
                 await asyncio.sleep(0.5)
                 continue
-            # 2회 실패 시 에러 리턴
-            result = {
-                "title": "", "company_name": "",
-                "total_chargers": 0, "used_chargers": 0, "remaining_chargers": 0,
-                "address": "", "chargers_info": [], "printString": "",
+            return {
+                "title": "",
+                "company_name": "",
+                "total_chargers": 0,
+                "used_chargers": 0,
+                "remaining_chargers": 0,
+                "address": "",
+                "chargers_info": [],
+                "printString": "",
                 "msg": f"ERROR: 페이지 로드 실패 ({e})",
                 "total_time": f"{time.time() - overall_start:.2f} seconds"
             }
-            print(json.dumps(result, ensure_ascii=False))
-            return
 
     tree = html.fromstring(html_content)
 
-    # 2) 제목 추출: <form id="form"> 내부의 <h4>
-    form_h4 = tree.xpath('//form[@id="form"]//h4')
-    title = ""
-    if form_h4:
-        title = "".join(form_h4[0].xpath('text()')).strip()
-    log(f"title: {title}")
+    # 1) 제목 (직접 텍스트 노드만 취합)
+    h4_nodes = tree.xpath('//form[@id="form"]//h4')
+    if h4_nodes:
+        title = ''.join(h4_nodes[0].xpath('./text()')).strip()
+    else:
+        title = ""
+    log(f"▶ title: {title}")
 
-    # 3) 회사명: <div class="org_me"><span>회사명</span></div>
+    # 2) 회사명
     company_nodes = tree.xpath('//div[@class="org_me"]/span/text()')
     company_name = company_nodes[0].strip() if company_nodes else ""
-    log(f"company_name: {company_name}")
+    log(f"▶ company_name: {company_name}")
 
-    # 4) 충전기 정보: table.table01 > tbody > tr 각각
+    # 3) 충전기 정보
     chargers_info = []
     rows = tree.xpath('//table[@class="table01"]//tbody/tr')
     for idx, row in enumerate(rows):
@@ -136,34 +132,19 @@ async def scrape_data(sid: str):
             if len(tds) < 3:
                 continue
             charger_type = tds[0].text_content().strip()
-
             td_text = tds[2].text_content().strip()
-            # 상태
             state_node = tds[2].xpath('./span[@class="state"]/text()')
             raw_status = state_node[0].strip() if state_node else td_text.split('\n')[0].strip()
-            
-            
-            # — 여기서 raw_status를 로그로 찍어 봅니다 —
-            log(f"[{idx}] raw_status: {raw_status!r}")
-
-            # 종료시간
             rdate_node = tds[2].xpath('./span[@class="rdate"]/text()')
-            date_finish = (
-                rdate_node[0].strip()
-                if rdate_node
-                else (td_text.split('\n')[-1].strip() if '\n' in td_text else "")
-            )
-            
-            
-            raw = raw_status  # HTML 에서 뽑아낸 “123분 충전중” 이나 “충전가능” 등
-            # 1) in-progress 여부 먼저 판단
-            if "충전중" in raw or "사용중" in raw:
-                charger_status    = parse_status(raw)  # 상태 문구 포맷만 하고
-                date_finish_info  = ""                  # 날짜 정보는 무조건 빈 문자열
+            date_finish = (rdate_node[0].strip() if rdate_node
+                           else (td_text.split('\n')[-1].strip() if '\n' in td_text else ""))
+
+            if "충전중" in raw_status or "사용중" in raw_status:
+                charger_status = parse_status(raw_status)
+                date_finish_info = ""
             else:
-                charger_status    = parse_status(raw)  # 상태 문구 포맷
-                date_finish_info  = compute_date_finish_info(date_finish)
-                
+                charger_status = parse_status(raw_status)
+                date_finish_info = compute_date_finish_info(date_finish)
 
             chargers_info.append({
                 "type": charger_type,
@@ -171,28 +152,31 @@ async def scrape_data(sid: str):
                 "dateFinish": date_finish,
                 "dateFinishInfo": date_finish_info
             })
-            log(f"charger[{idx}]: {charger_type}, {charger_status}, {date_finish_info}")
+            log(f"▶ charger[{idx}]: {charger_type}, {charger_status}, {date_finish_info}")
         except Exception as e:
-            log(f"parse row[{idx}] 에러: {e}")
+            log(f"▶ row[{idx}] 파싱 에러: {e}")
             continue
 
     total = len(chargers_info)
-    # used = sum(1 for c in chargers_info if "사용가능" not in c["status"])
     used = sum(
-        1
-        for c in chargers_info
+        1 for c in chargers_info
         if ("사용중" in c["status"]) or ("충전중" in c["status"]) or ("충전불가" in c["status"])
     )
     remaining = total - used
-    log(f"total={total}, used={used}, remaining={remaining}")
+    log(f"▶ total={total}, used={used}, remaining={remaining}")
 
-    # 5) 주소: table.table03 > tbody > tr > td
+    # 4) 주소
     addr_nodes = tree.xpath('//table[@class="table03"]//tbody/tr/td/text()')
     address = addr_nodes[0].strip() if addr_nodes else ""
-    log(f"address: {address}")
+    log(f"▶ address: {address}")
 
-    # 6) 결과 조합 및 출력
-    result = {
+    print_string = "\n".join(
+        f"{i+1}. {c['status']} ({c['dateFinishInfo']})" if c['dateFinishInfo']
+        else f"{i+1}. {c['status']}"
+        for i, c in enumerate(chargers_info)
+    )
+
+    return {
         "title": title,
         "company_name": company_name,
         "total_chargers": total,
@@ -200,34 +184,13 @@ async def scrape_data(sid: str):
         "remaining_chargers": remaining,
         "address": address,
         "chargers_info": chargers_info,
-        "printString": "\n".join(
-            f"{i+1}. {c['status']} ({c['dateFinishInfo']})" if c["dateFinishInfo"]
-            else f"{i+1}. {c['status']}"
-            for i, c in enumerate(chargers_info)
-        ),
+        "printString": print_string,
         "msg": "SUCCESS",
         "total_time": f"{time.time() - overall_start:.2f} seconds"
     }
-    print(json.dumps(result, ensure_ascii=False))
 
 async def shutdown():
     global browser
     if browser:
         await browser.close()
         log("브라우저 종료 완료")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="EV 충전소 정보 스크래퍼")
-    parser.add_argument("--sid", default="PL005189", help="스크랩할 SID (기본: PL005189)")
-    parser.add_argument("--log", action="store_true", help="디버깅 로그 출력")
-    args = parser.parse_args()
-
-    start_time = datetime.now()
-    log_enabled = args.log
-    sid = args.sid
-
-    log(f"스크립트 시작, sid={sid}, log={log_enabled}")
-    try:
-        asyncio.get_event_loop().run_until_complete(scrape_data(sid))
-    finally:
-        asyncio.get_event_loop().run_until_complete(shutdown())

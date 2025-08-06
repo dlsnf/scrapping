@@ -1,9 +1,4 @@
 
-111
-
-nuri 66
-
-
 //서버 정보
 
 centOS
@@ -12,17 +7,8 @@ centOS
 ssh -oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedAlgorithms=+ssh-rsa root@hansbuild.cafe24.com
 
 
-http://158.180.75.114/info.php
-
-
 python3 /var/www/html/scrapping/test.py
-
 python3 /var/www/html/scrapping/script.py
-
-
-curl -X GET http://158.180.75.114/scrapping/get_info.php
-
-curl -X http://158.180.75.114/scrapping/get_info.php?sid=PL005189
 
 
 //동편마을 공영주차장 플러그링크 완속
@@ -34,34 +20,79 @@ ME20A171
 
 
 
-도커
+
+
+//실행중인 컨테이너 도커 확인
+docker ps
+
+
+
 
 # 기존 컨테이너/이미지 제거
 sudo docker stop pyppeteer-service
 sudo docker rm pyppeteer-service
 sudo docker rmi pyppeteer-scraper
 
-# 새 이미지 빌드
-sudo docker build -t pyppeteer-scraper .
 
-# 상주 컨테이너 실행
-sudo docker run -d --name pyppeteer-service pyppeteer-scraper
+# 2) 기존 컨테이너 제거
+docker rm -f pyppeteer-service 2>/dev/null || true
 
+//도커 빌드
+docker build --no-cache -t pyppeteer-service .
 
+# 2) docker exec 로 컨테이너 내부에서 스크립트 실행 (기존)
+docker exec pyppeteer-service python /app/script.py --sid PL005189
 
-
-
-
-
-//실행중인 컨테이너 도커 확인
-docker ps
-
-//정상 종료
-sudo docker stop pyppeteer-service
+docker exec -it pyppeteer-service \python /app/script.py --sid PL005189 --log
 
 
-//강제 종료
-sudo docker kill pyppeteer-service
+
+
+###################### 도커 실행 (신규)
+# 1) 컨테이너 내리기
+docker stop pyppeteer-service && docker rm pyppeteer-service
+
+# 2) 이미지 재빌드
+docker build --no-cache -t pyppeteer-service:latest .
+
+# 3) 컨테이너 재실행
+docker run -d --name pyppeteer-service -p 5000:5000 pyppeteer-service:latest
+
+
+#
+도커 로그 팔로우 (터미널 새창에서 실행 추천)
+docker logs -f pyppeteer-service
+
+#테스트 실행(터미널 로그 포함)
+curl -i 'http://localhost/scrapping/get_info.php?sid=PL005189&debug=1'
+
+
+#테스트 실행
+curl -i 'http://localhost:5000/info?sid=PL005189'
+
+
+
+
+
+
+
+docker run --rm \
+  --network container:pyppeteer-service \
+  curlimages/curl:latest -i "http://localhost:5000/info?sid=PL005189"
+
+
+
+실행 중이지 않은 컨테이너 정리
+docker container prune
+
+
+사용하지 않는 이미지 정리
+docker image prune
+
+
+사용하지 않는 볼륨 정리
+docker volume prune
+
 
 
 
@@ -172,44 +203,6 @@ docker images | grep pyppeteer-service
 
 //용량 확인
 df -h
-
-
-
-
-# 기존 컨테이너/이미지 제거
-sudo docker stop pyppeteer-service
-sudo docker rm pyppeteer-service
-sudo docker rmi pyppeteer-scraper
-
-
-# 2) 기존 컨테이너 제거
-docker rm -f pyppeteer-service 2>/dev/null || true
-
-//도커 빌드
-docker build --no-cache -t pyppeteer-service .
-
-# 3) 새 컨테이너 실행 //백그라운드 실행하는
-docker run -d --name pyppeteer-service pyppeteer-service
-
-도커 실행
-# 2) docker exec 로 컨테이너 내부에서 스크립트 실행
-docker exec pyppeteer-service python /app/script.py --sid PL005189
-
-docker exec -it pyppeteer-service \python /app/script.py --sid PL005189 --log
-
-
-
-
-실행 중이지 않은 컨테이너 정리
-docker container prune
-
-
-사용하지 않는 이미지 정리
-docker image prune
-
-
-사용하지 않는 볼륨 정리
-docker volume prune
 
 
 

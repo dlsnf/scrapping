@@ -1,32 +1,46 @@
 <?php
 // URL에서 sid 파라미터 받기
 $sid = isset($_GET['sid']) ? trim($_GET['sid']) : '';
-
-// sid 값이 비어 있는지 검증
-if (empty($sid)) {
+if (!$sid) {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(array(
-        "msg" => "Error 파라미터 값이 존재하지 않습니다.",
-        "total_time" => "0.00 seconds"
-    ), JSON_UNESCAPED_UNICODE);
+        'msg'        => 'Error: sid 필요',
+        'total_time' => '0.00 seconds'
+    ));
     exit;
 }
 
-// sid를 명령어에 포함
-$command = "/usr/bin/docker exec pyppeteer-service python /app/script.py --sid " . escapeshellarg($sid);
+// 디버그 헤더 검사 (curl -H "X-Debug:1" ...)
+$debug = false;
+if (
+    (isset($_GET['debug']) && $_GET['debug'] === '1') 
+    || (isset($_SERVER['HTTP_X_DEBUG']) && $_SERVER['HTTP_X_DEBUG'] === '1')
+) {
+    $debug = true;
+}
 
-$output = shell_exec($command);
+// FastAPI 마이크로서비스에 HTTP 요청 (로그 플래그 전달)
+$url = 'http://127.0.0.1:5000/info?sid=' . urlencode($sid);
+if ($debug) {
+    // 터미널에서 curl -H "X-Debug:1" 이나 ?debug=1 로 호출할 때만 log=1
+    $url .= '&log=1';
+}
+
+$ch = curl_init($url);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
 
 header('Content-Type: application/json; charset=utf-8');
-if ($output === null || empty($output) || strpos($output, 'permission denied') !== false) {
-    $error = error_get_last();
+if ($response === false || $httpCode !== 200) {
     echo json_encode(array(
-        "error" => "스크립트 실행 실패",
-        "details" => $error,
-        "output" => $output
-    ), JSON_UNESCAPED_UNICODE);
+        'error'     => 'Failed to fetch data',
+        'http_code' => $httpCode
+    ));
     exit;
 }
 
-echo $output;
+echo $response;
 ?>
