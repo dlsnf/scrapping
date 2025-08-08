@@ -1,6 +1,6 @@
 
 
-22
+33
 
 
 //서버 정보
@@ -39,9 +39,7 @@ git commit -m "설명: 무엇을 왜 바꿨는지"
 
 git checkout master
 git pull --ff-only
-
 git merge --no-ff feature/my-change
-
 git push origin master
 
 
