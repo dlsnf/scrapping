@@ -1,6 +1,6 @@
 
 
-11
+22
 
 
 //서버 정보
@@ -26,9 +26,25 @@ tail -f /var/log/php_errors.log
 
 
 
+//git 가이드
+git fetch origin
+git checkout master
+git pull --ff-only
+
+git checkout -b feature/my-change
+
+git add -A
+git commit -m "설명: 무엇을 왜 바꿨는지"
 
 
-1
+git checkout master
+git pull --ff-only
+
+git merge --no-ff feature/my-change
+
+git push origin master
+
+
 
 //동편마을 공영주차장 플러그링크 완속
 PL005189
