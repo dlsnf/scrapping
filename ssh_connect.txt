@@ -1,6 +1,5 @@
 
 
-88
 
 
 //서버 정보
@@ -46,6 +45,11 @@ git push origin master
 //로컬 브랜치 모두 삭제 master 제외
 git branch | grep -v "master" | xargs git branch -D
 
+
+// 커밋 제외
+git update-index --skip-worktree admin/config.php
+// 해제하려면
+git update-index --no-skip-worktree admin/config.php
 
 
 
