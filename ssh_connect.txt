@@ -1,6 +1,6 @@
 
 
-55
+66
 
 
 //서버 정보
@@ -41,6 +41,12 @@ git checkout master
 git pull --ff-only
 git merge --no-ff feature/my-change
 git push origin master
+
+
+//로컬 브랜치 모두 삭제 master 제외
+git branch | grep -v "master" | xargs git branch -D
+
+
 
 
 
