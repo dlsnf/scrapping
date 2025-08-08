@@ -1,0 +1,188 @@
+
+//상품 테이블 수정일 컬럼 추가
+ALTER TABLE products ADD updated_at DATETIME NULL;
+UPDATE products SET updated_at = NOW() WHERE updated_at IS NULL;
+
+
+//고객 테이블 수정일 컬럼 추가
+ALTER TABLE customers
+  ADD updated_at DATETIME NULL;
+
+
+
+
+
+//테이블 설명 보기
+SELECT 
+  SUBSTRING_INDEX(SUBSTRING_INDEX(TABLE_NAME, 'table=', -1), '&', 1) AS pure_table_name,
+  TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'scrapping'
+ORDER BY pure_table_name;
+
+
+
+
+//테이블 설명 추가
+ALTER TABLE admins COMMENT = '관리자 계정 정보를 저장하는 테이블';
+ALTER TABLE customers COMMENT = '라이선스를 구매한 고객 정보를 저장하는 테이블';
+ALTER TABLE products COMMENT = '상품 또는 라이선스 플랜 정보를 저장하는 테이블';
+ALTER TABLE license_keys COMMENT = '발급된 라이선스 키와 상태를 관리하는 테이블';
+ALTER TABLE license_activations COMMENT = '라이선스 키의 활성화(장치) 기록을 저장하는 테이블';
+ALTER TABLE license_events COMMENT = '라이선스 관련 작업(발급, 수정, 폐기 등)의 감사 로그';
+
+
+
+
+
+
+/* ----- DB 생성 (root로 실행) ----- */
+CREATE DATABASE IF NOT EXISTS scrapping
+  DEFAULT CHARACTER SET utf8
+  DEFAULT COLLATE utf8_general_ci;
+USE scrapping;
+
+/* ===== admins ===== */
+CREATE TABLE admins (
+  id CHAR(36) NOT NULL,
+  username VARCHAR(100) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role ENUM('OWNER','ADMIN','OPERATOR','READONLY') NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  last_login_at DATETIME NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_admin_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+/* ===== customers =====
+   created_at은 TIMESTAMP로 (5.1 호환) */
+CREATE TABLE customers (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  email VARCHAR(200) NULL,
+  notes TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_customer_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+/* ===== products ===== */
+CREATE TABLE products (
+  id CHAR(36) NOT NULL,
+  code VARCHAR(100) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  max_activations INT NOT NULL DEFAULT 1,
+  valid_days INT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_product_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+/* ===== license_keys =====
+   - issued_at: DATETIME (기본값 없음) → INSERT 트리거에서 NOW()
+   - updated_at: 첫 번째 TIMESTAMP로 자동 갱신 */
+CREATE TABLE license_keys (
+  id CHAR(36) NOT NULL,
+  `key` CHAR(10) NOT NULL, /* 10자리 고정: 앱에서 ^[A-Z0-9]{10}$ 검증 */
+  status ENUM('ISSUED','ACTIVE','REVOKED','EXPIRED') NOT NULL,
+  product_id CHAR(36) NULL,
+  customer_id CHAR(36) NULL,
+
+  issued_at DATETIME NOT NULL,
+  activated_at DATETIME NULL,
+  expires_at DATETIME NULL,
+  revoked_at DATETIME NULL,
+
+  notes TEXT NULL,
+  meta TEXT NULL, /* JSON 대용 */
+  created_by_admin_id CHAR(36) NULL,
+
+  /* 5.1에서는 첫 번째 TIMESTAMP만 DEFAULT/ON UPDATE 가능 */
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                           ON UPDATE CURRENT_TIMESTAMP,
+
+  version INT NOT NULL DEFAULT 1,
+
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_license_key (`key`),
+  KEY ix_license_status (status),
+  KEY ix_license_expires (expires_at),
+  KEY ix_license_customer (customer_id),
+
+  CONSTRAINT fk_license_product  FOREIGN KEY (product_id)  REFERENCES products(id),
+  CONSTRAINT fk_license_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
+  CONSTRAINT fk_license_admin    FOREIGN KEY (created_by_admin_id) REFERENCES admins(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+/* issued_at 자동 세팅 트리거 (INSERT 시) */
+DELIMITER $$
+CREATE TRIGGER trg_license_keys_set_issued_at
+BEFORE INSERT ON license_keys
+FOR EACH ROW
+BEGIN
+  IF NEW.issued_at IS NULL OR NEW.issued_at = '0000-00-00 00:00:00' THEN
+    SET NEW.issued_at = NOW();
+  END IF;
+END$$
+DELIMITER ;
+
+/* version 증가 + updated_at 보정 (ON UPDATE와 중복 무해) */
+DELIMITER $$
+CREATE TRIGGER trg_license_keys_updated_at
+BEFORE UPDATE ON license_keys
+FOR EACH ROW
+BEGIN
+  SET NEW.updated_at = NOW();
+  SET NEW.version = OLD.version + 1;
+END$$
+DELIMITER ;
+
+/* ===== license_activations =====
+   - activated_at: 테이블 내 첫 번째 TIMESTAMP로 두어 기본값 허용
+   - is_active 플래그로 "활성만 유니크" 구현 */
+CREATE TABLE license_activations (
+  id CHAR(36) NOT NULL,
+  license_id CHAR(36) NOT NULL,
+  device_fingerprint VARCHAR(255) NOT NULL,
+  hostname VARCHAR(255) NULL,
+  ip VARCHAR(45) NULL,
+
+  activated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deactivated_at DATETIME NULL,
+
+  is_active TINYINT(1) NOT NULL DEFAULT 1, /* 활성 유니크를 위한 플래그 */
+
+  PRIMARY KEY (id),
+  KEY ix_activation_license (license_id),
+  CONSTRAINT fk_activation_license FOREIGN KEY (license_id) REFERENCES license_keys(id),
+  UNIQUE KEY ux_activation_unique (license_id, device_fingerprint, is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+/* 비활성화되면 is_active=0 */
+DELIMITER $$
+CREATE TRIGGER trg_activation_deactivate
+BEFORE UPDATE ON license_activations
+FOR EACH ROW
+BEGIN
+  IF NEW.deactivated_at IS NOT NULL THEN
+    SET NEW.is_active = 0;
+  END IF;
+END$$
+DELIMITER ;
+
+/* ===== license_events (감사 로그) =====
+   - created_at: TIMESTAMP 로 기본값 허용 */
+CREATE TABLE license_events (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  license_id CHAR(36) NOT NULL,
+  event_type ENUM('CREATE','UPDATE','REVOKE','RESTORE','ASSIGN','UNASSIGN','ACTIVATE','DEACTIVATE') NOT NULL,
+  actor_admin_id CHAR(36) NULL,
+  actor VARCHAR(100) NULL,
+  request_ip VARCHAR(45) NULL,
+  `before` TEXT NULL,
+  `after`  TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_event_license_created (license_id, created_at),
+  CONSTRAINT fk_event_license FOREIGN KEY (license_id) REFERENCES license_keys(id),
+  CONSTRAINT fk_event_admin FOREIGN KEY (actor_admin_id) REFERENCES admins(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;

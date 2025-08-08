@@ -1,14 +1,29 @@
 
 //서버 정보
+centOS 6.10 
+아파치 2.2.15
+php 5.3.3
+Python 3.7.12
+Docker 19.03.9, build 9d988398e7
+Mysql 5.1.73
 
-centOS
+
+
 
 //ssh 터미널 접속
 ssh -oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedAlgorithms=+ssh-rsa root@hansbuild.cafe24.com
 
+//mysql 접속
+mysql -u root -p
 
-python3 /var/www/html/scrapping/test.py
-python3 /var/www/html/scrapping/script.py
+
+//php 로그보기
+tail -f /var/log/php_errors.log
+
+
+
+
+
 
 
 //동편마을 공영주차장 플러그링크 완속
@@ -16,6 +31,32 @@ PL005189
 
 //동편마을 공영주차장 급속
 ME20A171
+
+
+
+
+//관리자페이지 로그인
+http://hansbuild.cafe24.com/scrapping/admin/index.php
+
+//DB설계
+
+//데이터베이스(스키마)
+scrapping
+
+//db select 계정
+scrapping_select
+
+//db admin 계정
+scrapping_admin
+
+
+
+
+
+
+
+
+
 
 
 
