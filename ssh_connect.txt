@@ -80,6 +80,27 @@ scrapping_admin
 
 
 
+//테스트 케이스
+
+//정상
+http://hansbuild.cafe24.com/scrapping/check_access.php?category=base&product=base001&key=EG92K6GPXP
+
+//키1
+http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_ev&product=PL005189&key=KBKARPB6II
+
+//키2
+http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_ev&product=ME20A171&key=IOVM13UY74
+
+
+
+//키 에러
+http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_ev&product=PL005189&key=KBKARPB5II
+
+//상품코드 에러
+http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_ev&product=PL005188&key=KBKARPB6II
+
+//카테고리 에러
+http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_e1v&product=PL005189&key=KBKARPB6II
 
 
 

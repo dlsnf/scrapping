@@ -1,4 +1,109 @@
 
+
+
+USE scrapping;
+
+ALTER TABLE license_keys
+  ADD COLUMN last_request_at DATETIME NULL AFTER daily_activations;
+
+ALTER TABLE license_keys
+  ADD COLUMN request_count_today INT NOT NULL DEFAULT 0 AFTER last_request_at;
+
+ALTER TABLE license_keys
+  ADD COLUMN request_count_date DATE NULL AFTER request_count_today;
+
+
+
+
+//스키마 변경
+
+ALTER TABLE license_keys ADD COLUMN last_access_at DATETIME NULL;
+
+
+
+
+
+//접근날짜 스키마 변경
+ALTER TABLE license_keys
+  ADD COLUMN total_activations INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '총 접근(활성) 카운트',
+  ADD COLUMN daily_activations INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '일일 접근 카운트',
+  ADD COLUMN daily_activations_date DATE NOT NULL DEFAULT '1970-01-01' COMMENT '일일 카운트 기준 날짜';
+
+
+
+
+//테이블 변경
+ALTER TABLE license_keys
+  ADD UNIQUE KEY ux_license_triplet (category_id, product_id, customer_id);
+
+
+ALTER TABLE customers DROP INDEX ux_customer_name;
+
+
+
+
+//DB 변경
+/* 0-1) 카테고리 마스터 */
+CREATE TABLE IF NOT EXISTS categories (
+  id   CHAR(36) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  description TEXT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_category_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+/* 0-2) products: 문자열 category → 참조 category_id 로 변경 (기존 있었다면 드롭) */
+ALTER TABLE products
+  ADD category_id CHAR(36) NULL AFTER name;
+-- 이전에 추가했던 VARCHAR(100) category 컬럼이 있다면 제거
+-- 에러 없이 진행하려면 존재할 때만 드롭하세요.
+-- ALTER TABLE products DROP COLUMN category;
+
+ALTER TABLE products
+  ADD CONSTRAINT fk_product_category FOREIGN KEY (category_id) REFERENCES categories(id);
+
+/* 0-3) customers: 카테고리 연결 */
+ALTER TABLE customers
+  ADD category_id CHAR(36) NULL AFTER email;
+
+ALTER TABLE customers
+  ADD CONSTRAINT fk_customer_category FOREIGN KEY (category_id) REFERENCES categories(id);
+
+/* 0-4) license_keys: 카테고리 연결 (선택한 카테고리를 직접 들고 있게) */
+ALTER TABLE license_keys
+  ADD category_id CHAR(36) NULL AFTER status;
+
+ALTER TABLE license_keys
+  ADD CONSTRAINT fk_license_category FOREIGN KEY (category_id) REFERENCES categories(id);
+
+
+
+
+
+
+
+
+
+//DB 마이그레이션 (MySQL 5.1.73)
+/* 1) products: 카테고리 추가, 사용 안 하는 컬럼 제거 */
+ALTER TABLE products
+  ADD category VARCHAR(100) NULL AFTER name;
+
+ALTER TABLE products
+  DROP COLUMN max_activations,
+  DROP COLUMN valid_days;
+
+/* 2) license_keys: 라이선스별 활성화 제한(무한=NULL) */
+ALTER TABLE license_keys
+  ADD max_activations INT NULL AFTER version,
+  ADD daily_max_activations INT NULL AFTER max_activations;
+
+
+
+
+
+
+
 //상품 테이블 수정일 컬럼 추가
 ALTER TABLE products ADD updated_at DATETIME NULL;
 UPDATE products SET updated_at = NOW() WHERE updated_at IS NULL;

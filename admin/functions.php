@@ -99,66 +99,114 @@ function log_event($license_id, $type, $actor_admin_id, $actor, $request_ip, $be
 /* 페이지 공통 헤더/푸터 */
 function render_header($title, $user=null){
     echo '<!doctype html><html><head><meta charset="utf-8">';
-    echo '<meta name="apple-mobile-web-app-capable" content="no">';
+    echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<title>'.h($title).'</title>';
-    echo '<style>
-    body{font:14px/1.4 Arial, Helvetica, sans-serif; margin:20px; color:#222}
-    a{color:#0b5fff; text-decoration:none}
-    a:hover{text-decoration:underline}
-    .topbar{margin-bottom:15px; padding-bottom:10px; border-bottom:1px solid #ddd}
-    .btn{display:inline-block; padding:6px 10px; border:1px solid #ccc; border-radius:4px; background:#f7f7f7}
-    .btn.primary{border-color:#2a62ff; background:#2a62ff; color:#fff}
-    .table{border-collapse:collapse; width:100%}
-    .table th,.table td{border:1px solid #ddd; padding:8px; vertical-align:top}
-    .table th{background:#fafafa}
-    .muted{color:#777}
-    .error{color:#b00020}
-    .ok{color:#0a7}
-    form.inline{display:inline}
-    input[type=text],select,textarea{padding:6px; border:1px solid #ccc; border-radius:3px; width:100%}
-    .row{display:block; margin-bottom:8px}
-    .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px}
-    </style>';
 
-    // ===== jQuery & DateTime Picker (로컬) =====
+    // 공통 스타일
+    echo '<link rel="stylesheet" href="assets/style.css">';
+
+    // jQuery & DateTime Picker (로컬)
     echo '<link rel="stylesheet" href="assets/jquery-ui.min.css">';
     echo '<link rel="stylesheet" href="assets/jquery-ui-timepicker-addon.min.css">';
     echo '<script src="assets/jquery.min.js"></script>';
     echo '<script src="assets/jquery-ui.min.js"></script>';
     echo '<script src="assets/jquery-ui-timepicker-addon.min.js"></script>';
     echo '<script>
-    if (window.jQuery) {
+      if (window.jQuery) {
         jQuery(function($){
-        $(".js-datetime").each(function(){
+          $(".js-datetime").each(function(){
             try {
-            $(this).datetimepicker({
+              $(this).datetimepicker({
                 dateFormat: "yy-mm-dd",
                 timeFormat: "HH:mm:ss",
                 showSecond: true,
                 controlType: "select",
                 stepHour: 1, stepMinute: 1, stepSecond: 1
-            });
+              });
             } catch(e) {}
+          });
         });
-        });
-    }
+      }
     </script>';
 
     echo '</head><body>';
-    echo '<div class="topbar">';
-    echo '<strong>'.h(APP_NAME).'</strong>';
-    echo ' &nbsp;|&nbsp; <a href="index.php">대시보드</a> &nbsp; ';
-    echo '<a href="licenses.php">라이선스</a> &nbsp; ';
-    echo '<a href="customers.php">고객</a> &nbsp; ';
-    echo '<a href="products.php">상품</a> &nbsp; ';
+
+    // 상단 바
+    echo '<header class="topbar container">';
+    echo '<div class="brand">'.h(APP_NAME).'</div>';
+    echo '<nav>';
+    echo '<a href="index.php">대시보드</a>';
+    echo '<a href="categories.php">카테고리</a> &nbsp; ';
+    echo '<a href="licenses.php">라이선스</a>';    
+    echo '<a href="customers.php">고객</a>';
+    echo '<a href="products.php">상품</a>';
     echo '<a href="events.php">감사로그</a>';
+    echo '</nav>';
     if ($user) {
-        echo ' &nbsp;|&nbsp; <span class="muted">'.h($user['username']).'('.h($user['role']).')</span> ';
-        echo ' <a class="btn" href="logout.php">로그아웃</a>';
+        echo '<div style="margin-left:auto" class="muted">'.h($user['username']).'('.h($user['role']).') ';
+        echo '<a class="btn" style="margin-left:8px" href="logout.php">로그아웃</a></div>';
     }
-    echo '</div>';
+    echo '</header>';
+
+    // 메인 컨테이너 시작
+    echo '<main class="container"><div class="page">';
 }
 
+
 function render_footer(){
+    echo '</div></main>';
+    // footer를 쓰고 싶으면 여기에 추가 가능: echo '<footer class="container muted">© '.date('Y').'</footer>';
     echo '</body></html>';
+}
+
+
+/* --- 정렬 도우미: ORDER BY 구문 만들기 --- */
+function get_sort_sql($allowed, $default_col, $default_dir){
+    $sort = isset($_GET['sort']) ? $_GET['sort'] : $default_col;
+    $dir  = isset($_GET['dir']) ? strtoupper($_GET['dir']) : $default_dir;
+    if (!isset($allowed[$sort])) $sort = $default_col;
+    if ($dir !== 'ASC' && $dir !== 'DESC') $dir = $default_dir;
+    return array('ORDER BY '.$allowed[$sort].' '.$dir, $sort, $dir);
+}
+
+/* --- 정렬 링크(↑/↓) --- */
+function sort_link($title, $key, $base=''){
+    if ($base==='') {
+        // 호출 파일명을 자동 추정
+        $base = basename($_SERVER['PHP_SELF']);
+    }
+    $curr_sort = isset($_GET['sort']) ? $_GET['sort'] : '';
+    $curr_dir  = isset($_GET['dir']) ? strtoupper($_GET['dir']) : 'ASC';
+    $next_dir  = ($curr_sort === $key && $curr_dir==='ASC') ? 'DESC' : 'ASC';
+    $arrow     = '';
+    if ($curr_sort === $key) $arrow = ($curr_dir==='ASC') ? ' ↑' : ' ↓';
+
+    $params = $_GET;
+    $params['sort'] = $key;
+    $params['dir']  = $next_dir;
+
+    $q = array();
+    foreach ($params as $k=>$v) { $q[] = urlencode($k).'='.urlencode($v); }
+    return '<a href="'.h($base).'?'.implode('&',$q).'">'.h($title).$arrow.'</a>';
+}
+
+function flash_render() {
+    if (!session_id()) session_start();
+    if (!empty($_SESSION['flash'])) {
+        foreach ($_SESSION['flash'] as $f) {
+            $cls = ($f['type']==='ok') ? 'flash-ok' : 'flash-error';
+            echo '<div class="'.$cls.'" style="padding:8px;margin:5px 0;border:1px solid #ccc;background:#f9f9f9">';
+            echo h($f['msg']);
+            echo '</div>';
+        }
+        unset($_SESSION['flash']);
+    }
+}
+
+function redirect_with($url, $msg, $type='ok') {
+    if (!session_id()) session_start();
+    if (!isset($_SESSION['flash'])) $_SESSION['flash'] = array();
+    $_SESSION['flash'][] = array('type'=>$type, 'msg'=>$msg);
+    header('Location: '.$url);
+    exit;
 }
