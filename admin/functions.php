@@ -98,7 +98,9 @@ function log_event($license_id, $type, $actor_admin_id, $actor, $request_ip, $be
 
 /* 페이지 공통 헤더/푸터 */
 function render_header($title, $user=null){
-    echo '<!doctype html><html><head><meta charset="utf-8"><title>'.h($title).'</title>';
+    echo '<!doctype html><html><head><meta charset="utf-8">';
+    echo '<meta name="apple-mobile-web-app-capable" content="no">';
+    echo '<title>'.h($title).'</title>';
     echo '<style>
     body{font:14px/1.4 Arial, Helvetica, sans-serif; margin:20px; color:#222}
     a{color:#0b5fff; text-decoration:none}
