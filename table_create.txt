@@ -1,5 +1,29 @@
 
 
+USE scrapping;
+
+-- (있다면 생략) products에 category_id, code가 있다고 가정
+-- 카테고리+코드 조합을 유니크로
+ALTER TABLE products
+  ADD UNIQUE KEY ux_product_category_code (category_id, code);
+
+
+
+
+
+USE scrapping;
+
+-- products에 등록일 컬럼 추가 (MySQL 5.1 호환)
+ALTER TABLE products
+  ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- (선택) 기존 데이터도 최신이 위로 오도록 임시로 name 기준으로 내림차순 배치하고 싶다면:
+-- UPDATE products SET created_at = NOW() ORDER BY name DESC;
+
+
+
+
+
 
 USE scrapping;
 

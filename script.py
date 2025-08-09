@@ -170,11 +170,12 @@ async def scrape_data(sid: str) -> dict:
     address = addr_nodes[0].strip() if addr_nodes else ""
     log(f"▶ address: {address}")
 
-    print_string = "\n".join(
-        f"{i+1}. {c['status']} ({c['dateFinishInfo']})" if c['dateFinishInfo']
-        else f"{i+1}. {c['status']}"
+    print_string = "\n\n".join(
+        f"{i+1}. {c['status']} ({c['dateFinishInfo']}) / {c['type']}" if c['dateFinishInfo']
+        else f"{i+1}. {c['status']} / {c['type']}"
         for i, c in enumerate(chargers_info)
     )
+
 
     return {
         "title": title,
