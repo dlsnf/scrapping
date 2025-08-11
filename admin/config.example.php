@@ -3,7 +3,7 @@
 date_default_timezone_set('Asia/Seoul');
 
 define('DB_HOST', 'localhost');
-define('DB_USER', 'id3');   // 요청하신 계정
+define('DB_USER', 'id4');   // 요청하신 계정
 define('DB_PASS', 'pass');      // 실제 비밀번호 입력
 define('DB_NAME', 'scrapping');
 
