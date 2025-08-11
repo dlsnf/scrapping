@@ -1,5 +1,4 @@
 <?php
-require_once __DIR__.'/config.php';
 require_once __DIR__.'/db.php';
 
 /* PHP 5.3에는 hash_equals() 없음 → 폴리필 */
@@ -40,15 +39,37 @@ function csrf_check() {
 }
 
 /* PHP 5.3용 난수 바이트 */
-function rand_bytes($length){
-    if (function_exists('openssl_random_pseudo_bytes')) {
-        $strong = false;
-        $b = openssl_random_pseudo_bytes($length, $strong);
-        if ($b !== false) return $b;
+
+/* -----------------------------------------
+ * 랜덤 / UUID / 안전 비교 (구버전 호환)
+ * ----------------------------------------- */
+if (!function_exists('rand_bytes')) {
+    function rand_bytes($len)
+    {
+        if (function_exists('openssl_random_pseudo_bytes')) {
+            $strong = false;
+            $b = openssl_random_pseudo_bytes($len, $strong);
+            if ($b !== false && $strong) return $b;
+        }
+        // 폴백: mt_rand
+        $out = '';
+        for ($i=0; $i<$len; $i++) $out .= chr(mt_rand(0,255));
+        return $out;
     }
-    $b = '';
-    for ($i=0; $i<$length; $i++) $b .= chr(mt_rand(0,255));
-    return $b;
+}
+
+if (!function_exists('uuid_v4')) {
+    function uuid_v4()
+    {
+        $data = rand_bytes(16);
+        $data[6] = chr((ord($data[6]) & 0x0f) | 0x40); // version
+        $data[8] = chr((ord($data[8]) & 0x3f) | 0x80); // variant
+        $hex = bin2hex($data);
+        return sprintf('%s-%s-%s-%s-%s',
+            substr($hex,0,8), substr($hex,8,4), substr($hex,12,4),
+            substr($hex,16,4), substr($hex,20,12)
+        );
+    }
 }
 
 /* SHA-256 + salt + 반복(레거시 환경용) */
@@ -66,17 +87,6 @@ function password_verify_legacy($password, $stored) {
     return hash_equals($stored, $calc);
 }
 
-/* UUID v4 (문자열) */
-function uuid_v4() {
-    $data = rand_bytes(16);
-    $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
-    $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
-    $hex = bin2hex($data);
-    return sprintf('%s-%s-%s-%s-%s',
-        substr($hex,0,8), substr($hex,8,4), substr($hex,12,4),
-        substr($hex,16,4), substr($hex,20,12)
-    );
-}
 
 /* 10자리 라이선스 키 (A-Z0-9) */
 function generate_license_key($len=10){

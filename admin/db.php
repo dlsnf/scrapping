@@ -1,184 +1,208 @@
 <?php
-// admin/db.php
-// PHP 5.3 호환, mysqlnd 불필요(= mysqli_stmt_get_result 미사용)
+/**
+ * 파일: /scrapping/admin/db.php
+ * 환경: PHP 5.3.3 / MySQL 5.1.x (mysqlnd 없이 동작)
+ * - 접속 정보는 config.php 상수만 사용
+ * - get_result() 미사용 (bind_result + metadata 방식)
+ * - 제공 헬퍼: db_one, db_all, db_exec, db_begin/commit/rollback, db_insert_id
+ * - 유틸: rand_bytes, uuid_v4, hash_equals (폴리필)
+ */
 
-require_once __DIR__ . '/config.php';
+if (!defined('SCRAPPING_DB_PHP')) define('SCRAPPING_DB_PHP', 1);
 
-if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
-if (!defined('DB_USER')) define('DB_USER', 'root');
-if (!defined('DB_PASS')) define('DB_PASS', '');
-if (!defined('DB_NAME')) define('DB_NAME', 'scrapping');
-if (!defined('DB_PORT')) define('DB_PORT', 3306);
+require_once __DIR__.'/config.php';
 
-$DB = null;
+/* -----------------------------------------
+ * 연결 (싱글톤)
+ * ----------------------------------------- */
+function db()
+{
+    static $mysqli = null;
+    if ($mysqli instanceof mysqli) return $mysqli;
 
-/* 항상 유효한 mysqli 링크 반환 */
-function db_get() {
-    global $DB;
-    if ($DB instanceof mysqli) {
-        return $DB;
+    // 에러 리포트 끔 (구버전 호환)
+    if (!defined('MYSQLI_INIT_DONE')) {
+        define('MYSQLI_INIT_DONE', 1);
+        mysqli_report(MYSQLI_REPORT_OFF);
     }
-    $DB = mysqli_init();
-    if (!$DB) {
-        die('DB init failed');
+
+    $host = defined('DB_HOST') ? DB_HOST : 'localhost';
+    $user = defined('DB_USER') ? DB_USER : 'root';
+    $pass = defined('DB_PASS') ? DB_PASS : '';
+    $name = defined('DB_NAME') ? DB_NAME : 'test';
+
+    $mysqli = @new mysqli($host, $user, $pass, $name);
+    if ($mysqli->connect_error) {
+        die('DB 연결 실패: '.$mysqli->connect_error);
     }
-    if (!@mysqli_real_connect($DB, DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT)) {
-        die('DB connect failed: '.mysqli_connect_error());
+
+    // utf8 (5.1 환경: utf8mb4 미지원일 수 있음)
+    if (!$mysqli->set_charset('utf8')) {
+        $mysqli->query("SET NAMES utf8");
     }
-    mysqli_set_charset($DB, 'utf8');
-    return $DB;
+    return $mysqli;
 }
 
-/* 선택: 명시적 종료 */
-function db_close() {
-    global $DB;
-    if ($DB instanceof mysqli) {
-        mysqli_close($DB);
-        $DB = null;
-    }
+function db_close()
+{
+    $m = db();
+    if ($m instanceof mysqli) $m->close();
 }
 
-/* 트랜잭션 헬퍼 (prepared 아님) */
-function db_begin() {
-    $link = db_get();
-    mysqli_autocommit($link, false); // 트랜잭션 시작
+/* -----------------------------------------
+ * 트랜잭션
+ * ----------------------------------------- */
+function db_begin()
+{
+    $m = db();
+    if ($m->autocommit(false) === false) {
+        throw new Exception('DB autocommit(false) 실패: '.$m->error);
+    }
 }
-function db_commit() {
-    $link = db_get();
-    mysqli_commit($link);
-    mysqli_autocommit($link, true);
+function db_commit()
+{
+    $m = db();
+    if ($m->commit() === false) throw new Exception('DB COMMIT 실패: '.$m->error);
+    $m->autocommit(true);
 }
-function db_rollback() {
-    $link = db_get();
-    mysqli_rollback($link);
-    mysqli_autocommit($link, true);
+function db_rollback()
+{
+    $m = db();
+    $m->rollback();
+    $m->autocommit(true);
 }
 
-/* call_user_func_array용 참조 래퍼 (PHP 5.x) */
-function _db_ref_values(&$arr){
-    // PHP 5.3에서는 참조 배열이 필요
-    if (strnatcmp(phpversion(),'5.3') >= 0) {
-        $refs = array();
-        foreach($arr as $k => $v) $refs[$k] = &$arr[$k];
-        return $refs;
+/* -----------------------------------------
+ * 내부: prepare + bind
+ *  - $types: 'sii' 같은 문자열 또는 null
+ *  - $params: array(...) 또는 null
+ * ----------------------------------------- */
+function _db_prepare_bind($sql, $types = null, $params = null)
+{
+    $m = db();
+    $stmt = $m->prepare($sql);
+    if ($stmt === false) {
+        throw new Exception('DB prepare error: '.$m->error.' (SQL='.substr($sql,0,200).')');
     }
-    return $arr;
+
+    if ($types !== null && $params !== null) {
+        // 인자 수 체크(디버깅 도움)
+        if (strlen($types) != count($params)) {
+            $stmt->close();
+            throw new Exception('bind_param 인자 수 불일치: types='.strlen($types).', params='.count($params));
+        }
+        // call_user_func_array용 참조 배열 구성
+        $bind = array($types);
+        for ($i=0; $i<count($params); $i++) {
+            $bind[] = &$params[$i];
+        }
+        if (!call_user_func_array(array($stmt, 'bind_param'), $bind)) {
+            $err = $stmt->error;
+            $stmt->close();
+            throw new Exception('DB bind_param error: '.$err);
+        }
+    }
+
+    if (!$stmt->execute()) {
+        $err = $stmt->error;
+        $stmt->close();
+        throw new Exception('DB execute error: '.$err);
+    }
+    return $stmt;
 }
 
-/* 내부: PREPARE + BIND + EXECUTE (결과 없는 쿼리) */
-function _db_exec_stmt($sql, $types, $params) {
-    $link = db_get();
-    $stmt = mysqli_prepare($link, $sql);
-    if (!$stmt) {
-        throw new Exception('DB prepare error: '.mysqli_error($link));
+/* -----------------------------------------
+ * 내부: 결과 바인딩 유틸 (mysqlnd 불필요)
+ * ----------------------------------------- */
+function _stmt_bind_assoc(mysqli_stmt $stmt, &$row, &$binds)
+{
+    $meta = $stmt->result_metadata();
+    if (!$meta) { $row = null; $binds = null; return false; }
+
+    $row = array();
+    $binds = array();
+    while ($field = $meta->fetch_field()) {
+        $row[$field->name] = null;
+        $binds[] = &$row[$field->name];
     }
-    $bind = array_merge(array($stmt, $types), _db_ref_values($params));
-    call_user_func_array('mysqli_stmt_bind_param', $bind);
-    if (!mysqli_stmt_execute($stmt)) {
-        $err = mysqli_stmt_error($stmt);
-        mysqli_stmt_close($stmt);
-        throw new Exception('DB exec error: '.$err);
+    call_user_func_array(array($stmt, 'bind_result'), $binds);
+    return true;
+}
+
+/* -----------------------------------------
+ * SELECT 한 행
+ *  - $throw=true 면 결과 없을 때 예외
+ * ----------------------------------------- */
+function db_one($sql, $types = null, $params = null, $throw = false)
+{
+    $stmt = _db_prepare_bind($sql, $types, $params);
+
+    $row = null; $binds = null;
+    $hasMeta = _stmt_bind_assoc($stmt, $row, $binds);
+    if (!$hasMeta) { $stmt->close(); if ($throw) throw new Exception('DB not found (db_one)'); return null; }
+
+    $found = $stmt->fetch();
+    $stmt->free_result();
+    $stmt->close();
+
+    if (!$found) { if ($throw) throw new Exception('DB not found (db_one)'); return null; }
+
+    // ✨ 참조 끊고 값 복사
+    $copy = array();
+    foreach ($row as $k => $v) $copy[$k] = $v;
+    return $copy;
+}
+
+
+/* -----------------------------------------
+ * SELECT 여러 행
+ * ----------------------------------------- */
+function db_all($sql, $types = null, $params = null)
+{
+    $stmt = _db_prepare_bind($sql, $types, $params);
+
+    $row = null; $binds = null;
+    $hasMeta = _stmt_bind_assoc($stmt, $row, $binds);
+    if (!$hasMeta) { $stmt->close(); return array(); }
+
+    $rows = array();
+    $stmt->store_result();
+    while ($stmt->fetch()) {
+        // ✨ 매 행마다 깊은 복사본을 push (참조 끊기)
+        $copy = array();
+        foreach ($row as $k => $v) $copy[$k] = $v;
+        $rows[] = $copy;
     }
-    $affected = mysqli_stmt_affected_rows($stmt);
-    mysqli_stmt_close($stmt);
+    $stmt->free_result();
+    $stmt->close();
+    return $rows;
+}
+
+/* -----------------------------------------
+ * INSERT / UPDATE / DELETE
+ * ----------------------------------------- */
+function db_exec($sql, $types = null, $params = null)
+{
+    $stmt = _db_prepare_bind($sql, $types, $params);
+    $affected = $stmt->affected_rows;
+    $stmt->close();
     return $affected;
 }
 
-/* 내부: PREPARE + BIND + EXECUTE (SELECT 결과를 bind_result로 받기) */
-function _db_select_stmt($sql, $types, $params, $fetch_all=false) {
-    $link = db_get();
-    $stmt = mysqli_prepare($link, $sql);
-    if (!$stmt) {
-        throw new Exception('DB prepare error: '.mysqli_error($link));
-    }
-    $bind = array_merge(array($stmt, $types), _db_ref_values($params));
-    call_user_func_array('mysqli_stmt_bind_param', $bind);
-
-    if (!mysqli_stmt_execute($stmt)) {
-        $err = mysqli_stmt_error($stmt);
-        mysqli_stmt_close($stmt);
-        throw new Exception('DB exec error: '.$err);
-    }
-
-    $meta = mysqli_stmt_result_metadata($stmt);
-    if (!$meta) {
-        // SELECT가 아님
-        $row = null;
-        mysqli_stmt_close($stmt);
-        return $fetch_all ? array() : $row;
-    }
-
-    $fields = array();
-    $row = array();
-    $bindFields = array();
-    while ($field = mysqli_fetch_field($meta)) {
-        $fields[] = $field->name;
-        $row[$field->name] = null;
-        $bindFields[] = &$row[$field->name];
-    }
-    mysqli_free_result($meta);
-
-    call_user_func_array('mysqli_stmt_bind_result', array_merge(array($stmt), $bindFields));
-
-    $rows = array();
-    while (mysqli_stmt_fetch($stmt)) {
-        // 복제해서 저장
-        $copy = array();
-        foreach ($fields as $f) {
-            $copy[$f] = $row[$f];
-        }
-        if ($fetch_all) {
-            $rows[] = $copy;
-        } else {
-            // 첫 행만
-            mysqli_stmt_close($stmt);
-            return $copy;
-        }
-    }
-    mysqli_stmt_close($stmt);
-    return $fetch_all ? $rows : null;
+function db_insert_id()
+{
+    return db()->insert_id;
 }
 
-/* 실행: INSERT/UPDATE/DELETE/DDL 등 */
-function db_exec($sql, $types=null, $params=array()) {
-    $link = db_get();
-    if ($types === null) {
-        $ok = mysqli_query($link, $sql);
-        if (!$ok) {
-            throw new Exception('DB exec error: '.mysqli_error($link));
-        }
-        return true;
-    } else {
-        return _db_exec_stmt($sql, $types, $params);
+
+
+
+if (!function_exists('hash_equals')) {
+    function hash_equals($a, $b){
+        $a = (string)$a; $b = (string)$b;
+        if (strlen($a) !== strlen($b)) return false;
+        $res = 0; $len = strlen($a);
+        for ($i=0; $i<$len; $i++) $res |= ord($a[$i]) ^ ord($b[$i]);
+        return $res === 0;
     }
 }
-
-/* 한 행 */
-function db_one($sql, $types=null, $params=array()) {
-    $link = db_get();
-    if ($types === null) {
-        $res = mysqli_query($link, $sql);
-        if (!$res) throw new Exception('DB query error: '.mysqli_error($link));
-        $row = mysqli_fetch_assoc($res);
-        if ($res) mysqli_free_result($res);
-        return $row;
-    } else {
-        return _db_select_stmt($sql, $types, $params, false);
-    }
-}
-
-/* 여러 행 */
-function db_all($sql, $types=null, $params=array()) {
-    $link = db_get();
-    if ($types === null) {
-        $res = mysqli_query($link, $sql);
-        if (!$res) throw new Exception('DB query error: '.mysqli_error($link));
-        $rows = array();
-        while ($r = mysqli_fetch_assoc($res)) $rows[] = $r;
-        if ($res) mysqli_free_result($res);
-        return $rows;
-    } else {
-        return _db_select_stmt($sql, $types, $params, true);
-    }
-}
-
