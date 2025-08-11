@@ -8,7 +8,7 @@
 
 /* ===== 여기 값만 이 파일에서 관리 ===== */
 if (!defined('EV_DB_HOST')) define('EV_DB_HOST', 'localhost');
-if (!defined('EV_DB_USER')) define('EV_DB_USER', 'scrapping_select');   // ← 원하는 전용 계정으로 변경
+if (!defined('EV_DB_USER')) define('EV_DB_USER', '');   // ← 원하는 전용 계정으로 변경
 if (!defined('EV_DB_PASS')) define('EV_DB_PASS', '');          // ← 원하는 전용 비밀번호
 if (!defined('EV_DB_NAME')) define('EV_DB_NAME', 'scrapping');         // ← DB명
 
