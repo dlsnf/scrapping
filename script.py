@@ -27,23 +27,44 @@ def compute_date_finish_info(date_finish_str: str) -> str:
     finish_dt = seoul.localize(naive)
     now = datetime.now(seoul)
     diff = now - finish_dt
+
     if diff.total_seconds() < 0:
         return ""
-    total_min = int(diff.total_seconds() // 60)
-    h, m = divmod(total_min, 60)
     if diff.total_seconds() < 60:
         return "방금 전 종료"
+
+    total_min = int(diff.total_seconds() // 60)
+    h, m = divmod(total_min, 60)
+
+    # 24시간 이상이면 '일 시간'만 표기 (분은 생략)
+    if h >= 24:
+        d = h // 24
+        rem_h = h % 24
+        return f"{d}일 {rem_h}시간 전 종료"
+
+    # 24시간 미만이면 '시간 분' 표기
     return f"{h}시간 {m}분 전 종료" if h > 0 else f"{m}분 전 종료"
 
 def parse_status(status_text: str) -> str:
     text = status_text.strip()
-    m = re.match(r"(\d+)분\s*충전중[’']?", text)
+    # 예: "1시간21분 충전중", "1시간 21분 충전중", "1시간 충전중", "21분 충전중" 모두 커버
+    m = re.match(r"(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?\s*충전중[’']?$", text)
     if m:
-        total_min = int(m.group(1))
-        h, mm = divmod(total_min, 60)
-        if h:
-            return f"충전중 ({h}시간 {mm}분)"
-        return f"충전중 ({mm}분)"
+        hh = m.group(1)
+        mm = m.group(2)
+        if hh and mm:
+            return f"충전중 ({int(hh)}시간 {int(mm)}분)"
+        elif hh:
+            return f"충전중 ({int(hh)}시간)"
+        elif mm:
+            minutes = int(mm)
+            # 분만 있을 때 60분 이상이면 시/분으로 분해
+            if minutes >= 60:
+                h, r = divmod(minutes, 60)
+                return f"충전중 ({h}시간 {r}분)"
+            return f"충전중 ({minutes}분)"
+        else:
+            return "충전중"
     return text
 
 async def init_browser():

@@ -1,6 +1,6 @@
 
 
-99
+11
 
 
 //서버 정보
@@ -103,6 +103,20 @@ http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_ev&pro
 http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_e1v&product=PL005189&key=KBKARPB6II
 
 
+
+//강릉 url
+http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PI330429&key=GG3FIMS6WO
+
+
+
+
+//누리집 url
+
+//완속
+https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PL005189&pFlag=Y
+
+//강릉
+https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PI330429&pFlag=Y
 
 
 
