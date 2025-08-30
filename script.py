@@ -10,16 +10,58 @@ import pytz
 from pyppeteer import launch
 from lxml import html
 
-# 전역 싱글톤
 browser = None
-page = None
-log_enabled = False  # 디버그 로그를 터미널 테스트 시에만 켜고 싶으면 app.py에서 True로 세팅하세요
+log_enabled = False  # 디버그 로그를 터미널 테스트 시 켜기
 
 def log(message: str):
     if not log_enabled:
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[LOG {now}] {message}")
+
+# -----------------------------------
+# 콘솔 메시지 필터링 함수
+# -----------------------------------
+def handle_console(msg):
+    if "ol is not defined" in msg.text:
+        return
+    print(f"[PAGE LOG] {msg.text}")
+
+# -----------------------------------
+# 브라우저 초기화 (싱글톤)
+# -----------------------------------
+async def init_browser():
+    global browser
+    if browser is None:
+        browser = await launch(
+            headless=True,
+            dumpio=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-extensions",
+                "--disable-logging",
+                "--log-level=3",
+            ],
+            executablePath="/usr/bin/chromium"
+        )
+        log("브라우저 초기화 완료")
+    return browser
+
+# -----------------------------------
+# 페이지 생성 (요청마다 새 페이지)
+# -----------------------------------
+async def new_page():
+    br = await init_browser()
+    page = await br.newPage()
+    page.on("console", lambda msg: handle_console(msg))
+    await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/539.36"
+    )
+    await page.setViewport({"width": 800, "height": 600})
+    return page
 
 def compute_date_finish_info(date_finish_str: str) -> str:
     seoul = pytz.timezone("Asia/Seoul")
@@ -36,18 +78,15 @@ def compute_date_finish_info(date_finish_str: str) -> str:
     total_min = int(diff.total_seconds() // 60)
     h, m = divmod(total_min, 60)
 
-    # 24시간 이상이면 '일 시간'만 표기 (분은 생략)
     if h >= 24:
         d = h // 24
         rem_h = h % 24
         return f"{d}일 {rem_h}시간 전 종료"
 
-    # 24시간 미만이면 '시간 분' 표기
     return f"{h}시간 {m}분 전 종료" if h > 0 else f"{m}분 전 종료"
 
 def parse_status(status_text: str) -> str:
     text = status_text.strip()
-    # 예: "1시간21분 충전중", "1시간 21분 충전중", "1시간 충전중", "21분 충전중" 모두 커버
     m = re.match(r"(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?\s*충전중[’']?$", text)
     if m:
         hh = m.group(1)
@@ -58,7 +97,6 @@ def parse_status(status_text: str) -> str:
             return f"충전중 ({int(hh)}시간)"
         elif mm:
             minutes = int(mm)
-            # 분만 있을 때 60분 이상이면 시/분으로 분해
             if minutes >= 60:
                 h, r = divmod(minutes, 60)
                 return f"충전중 ({h}시간 {r}분)"
@@ -67,46 +105,23 @@ def parse_status(status_text: str) -> str:
             return "충전중"
     return text
 
-async def init_browser():
-    global browser, page
-    if browser is None:
-        browser = await launch(
-            headless=True,
-            dumpio=True,   # Chromium stderr를 uvicorn 로그로 흘립니다
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-extensions",
-                "--disable-logging",
-                "--log-level=3",
-            ],
-            executablePath="/usr/bin/chromium"
-        )
-        page = await browser.newPage()
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/539.36"
-        )
-        await page.setViewport({"width": 800, "height": 600})
-        log("브라우저 및 페이지 초기화 완료")
-    return page
-
+# -----------------------------------
+# 스크래핑 함수 (요청마다 page 생성)
+# -----------------------------------
 async def scrape_data(sid: str) -> dict:
     overall_start = time.time()
     log(f"▶ scrape_data 시작 (sid={sid})")
-    page_inst = await init_browser()
-    log("▶ init_browser 완료")
+    page_inst = await new_page()
+    log("▶ new_page 완료")
 
     url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
     html_content = None
     for attempt in range(2):
         try:
             log(f"▶ goto 시도 {attempt+1}")
-            await page_inst.goto(url, {"waitUntil": "domcontentloaded", "timeout": 5000})
-            log("▶ waitForSelector 전")
+            await page_inst.goto(url, {"waitUntil": "networkidle2", "timeout": 10000})
+            await asyncio.sleep(0.5)  # JS 실행 안정화
             await page_inst.waitForSelector("#form", {"timeout": 2000})
-            log("▶ waitForSelector 완료")
             html_content = await page_inst.content()
             if html_content.strip():
                 break
@@ -129,22 +144,13 @@ async def scrape_data(sid: str) -> dict:
                 "total_time": f"{time.time() - overall_start:.2f} seconds"
             }
 
+    # HTML 파싱 (기존 로직 동일)
     tree = html.fromstring(html_content)
-
-    # 1) 제목 (직접 텍스트 노드만 취합)
     h4_nodes = tree.xpath('//form[@id="form"]//h4')
-    if h4_nodes:
-        title = ''.join(h4_nodes[0].xpath('./text()')).strip()
-    else:
-        title = ""
-    log(f"▶ title: {title}")
-
-    # 2) 회사명
+    title = ''.join(h4_nodes[0].xpath('./text()')).strip() if h4_nodes else ""
     company_nodes = tree.xpath('//div[@class="org_me"]/span/text()')
     company_name = company_nodes[0].strip() if company_nodes else ""
-    log(f"▶ company_name: {company_name}")
 
-    # 3) 충전기 정보
     chargers_info = []
     rows = tree.xpath('//table[@class="table01"]//tbody/tr')
     for idx, row in enumerate(rows):
@@ -184,12 +190,8 @@ async def scrape_data(sid: str) -> dict:
         if ("사용중" in c["status"]) or ("충전중" in c["status"]) or ("충전불가" in c["status"])
     )
     remaining = total - used
-    log(f"▶ total={total}, used={used}, remaining={remaining}")
-
-    # 4) 주소
     addr_nodes = tree.xpath('//table[@class="table03"]//tbody/tr/td/text()')
     address = addr_nodes[0].strip() if addr_nodes else ""
-    log(f"▶ address: {address}")
 
     print_string = "\n\n".join(
         f"{i+1}. {c['status']} ({c['dateFinishInfo']}) / {c['type']}" if c['dateFinishInfo']
@@ -197,6 +199,7 @@ async def scrape_data(sid: str) -> dict:
         for i, c in enumerate(chargers_info)
     )
 
+    await page_inst.close()  # ----------------------------------- 중요: 요청마다 페이지 종료
 
     return {
         "title": title,
