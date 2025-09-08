@@ -107,6 +107,8 @@ http://hansbuild.cafe24.com/scrapping/check_access.php?category=scrapping_e1v&pr
 //강릉 url
 http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PI330429&key=GG3FIMS6WO
 
+//완속
+http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II
 
 
 

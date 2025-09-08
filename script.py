@@ -92,18 +92,18 @@ def parse_status(status_text: str) -> str:
         hh = m.group(1)
         mm = m.group(2)
         if hh and mm:
-            return f"충전중 ({int(hh)}시간 {int(mm)}분)"
+            return f"충전중\n({int(hh)}시간 {int(mm)}분)"
         elif hh:
-            return f"충전중 ({int(hh)}시간)"
+            return f"충전중\n({int(hh)}시간)"
         elif mm:
             minutes = int(mm)
             if minutes >= 60:
                 h, r = divmod(minutes, 60)
-                return f"충전중 ({h}시간 {r}분)"
-            return f"충전중 ({minutes}분)"
+                return f"충전중\n({h}시간 {r}분)"
+            return f"충전중\n({minutes}분)"
         else:
-            return "충전중"
-    return text
+            return "충전중\n"
+    return text + "\n"
 
 # -----------------------------------
 # 스크래핑 함수 (요청마다 page 생성)
