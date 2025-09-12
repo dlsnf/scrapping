@@ -8,7 +8,7 @@ centOS 6.10
 아파치 2.2.15
 php 5.3.3
 Python 3.7.12
-Docker 19.03.9, build 9d988398e7
+Docker 19.03.9
 Mysql 5.1.73
 
 
@@ -129,6 +129,7 @@ https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PI330429&pFlag=Y
 
 
 
+
 //실행중인 컨테이너 도커 확인
 docker ps
 
@@ -162,22 +163,45 @@ docker stop pyppeteer-service && docker rm pyppeteer-service
 # 2) 이미지 재빌드
 docker build --no-cache -t pyppeteer-service:latest .
 
+
 # 3) 컨테이너 재실행
-docker run -d --name pyppeteer-service -p 5000:5000 pyppeteer-service:latest
+docker run -d --name pyppeteer-service -p 5000:5000 --memory=768m --shm-size=256m --restart=unless-stopped pyppeteer-service:latest
+
+
+
+
+
+불필요한 컨테이너/이미지 정리 이거 하나면 됨!!
+docker system prune -af
+
+
+
+
+
+
 
 
 #
 도커 로그 팔로우 (터미널 새창에서 실행 추천)
 docker logs -f pyppeteer-service
 
+docker logs -f --timestamps pyppeteer-service
+
+
+
+#이전 로그 기록 보기
+tail -n 200 /var/log/dockerd.log
+
 #테스트 실행(터미널 로그 포함)
-curl -i 'http://localhost/scrapping/get_info.php?sid=PL005189&debug=1'
+curl -i 'http://localhost/scrapping/get_info.php?sid=PL005189&log=1'
 
 
 #테스트 실행
-curl -i 'http://localhost:5000/info?sid=PL005189'
+curl -i 'http://localhost:5000/info?sid=PL005189&log=1'
 
+curl -sS 'http://localhost:5000/health'
 
+curl -s -H 'X-Debug:1' 'http://hansbuild.cafe24.com/scrapping/get_info.php?sid=PL005189' | jq .
 
 
 
@@ -186,6 +210,10 @@ curl -i 'http://localhost:5000/info?sid=PL005189'
 docker run --rm \
   --network container:pyppeteer-service \
   curlimages/curl:latest -i "http://localhost:5000/info?sid=PL005189"
+
+
+
+
 
 
 
@@ -211,9 +239,11 @@ sudo docker images
 
 
 
+//서버 메모리 상태 확인
+echo "== SNAPSHOT =="; date; uptime; echo; free -m; echo; vmstat 1 5; echo; echo "Top swappers:"; echo "PID  RSS(MB) SWAP(MB) CMD"; for p in /proc/[0-9]*; do pid=${p#/proc/};   rss=$(awk '/VmRSS:/{print int($2/1024)}' $p/status 2>/dev/null);   swp=$(awk '/VmSwap:/{print int($2/1024)}' $p/status 2>/dev/null);   [ -z "$rss$swp" ] && continue;   cmd=$(tr -d '\0' < $p/cmdline | cut -c1-80);   [ -z "$cmd" ] && cmd="[$(awk '/Name:/{print $2}' $p/status 2>/dev/null)]";   printf "%-6s %-7s %-8s %s\n" "$pid" "$rss" "$swp" "$cmd"; done | sort -k3,3nr | head -n 15
 
-1. (status) / (type) / (dateFinishInfo)
-2. (status) / (type) / (dateFinishInfo)
+
+
 
 
 

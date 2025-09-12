@@ -1,19 +1,17 @@
 <?php
 // 파일: /scrapping/get_ev_info.php
 // 목적: 외부 호출 엔드포인트 (ev 전용 DB 사용 + 접근 체크 include)
-// 주의: PHP 5.3 호환용으로 JSON 한글이 \uXXXX로 안 나오게 후처리 헬퍼 포함
 
-require_once __DIR__ . '/db_ev.php';          // ★ admin/db.php 대신 이 파일 사용
-require_once __DIR__ . '/check_access_ev.php';// ★ ev 전용 접근체크
+require_once __DIR__ . '/db_ev.php';
+require_once __DIR__ . '/check_access_ev.php';
 
 /* -----------------------
  * JSON 한글 깨짐 방지(php5.3)
  * ----------------------- */
 if (!function_exists('json_encode_utf8')) {
     function json_encode_utf8($data) {
-        $json = json_encode($data); // PHP 5.3: \uXXXX 로 나옴
+        $json = json_encode($data);
         if ($json === false) return 'null';
-        // \uXXXX → UTF-8 문자로 변환
         return preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', function($m){
             $code = hexdec($m[1]);
             if ($code < 0x80) {
@@ -29,7 +27,6 @@ if (!function_exists('json_encode_utf8')) {
         }, $json);
     }
 }
-
 function json_out($arr) {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode_utf8($arr);
@@ -39,7 +36,7 @@ function json_out($arr) {
 /* -----------------------
  * 파라미터
  * ----------------------- */
-$sid      = isset($_GET['sid']) ? trim($_GET['sid']) : '';           // product code
+$sid      = isset($_GET['sid']) ? trim($_GET['sid']) : '';
 $category = isset($_GET['category']) ? trim($_GET['category']) : '';
 $key      = isset($_GET['key']) ? strtoupper(trim($_GET['key'])) : '';
 $debug    = (
@@ -58,37 +55,80 @@ if ($sid==='' || $category==='' || $key==='') {
 }
 
 /* -----------------------
- * 접근 체크 (include 방식, ev DB 사용)
- * check_access_inline_ev()는 'access' 또는 사유 문자열을 반환
+ * 접근 체크
  * ----------------------- */
-$chk = check_access_inline_ev($category, $sid /* product */, $key, 'text');
+$chk = check_access_inline_ev($category, $sid, $key, 'text');
 if ($chk !== 'access') {
     json_out(array(
-        'error'     => $chk,   // 예: '라이선스 없음', '카테고리 불일치', '만료됨', ...
+        'error'     => $chk,
         'http_code' => 403
     ));
 }
 
 /* -----------------------
- * 실제 업무 로직 (예: 내부 FastAPI 호출)
+ * 내부 FastAPI 호출
+ * - PHP 타임아웃을 약간 늘리고(10초),
+ * - FastAPI에 timeout_sec=9로 상한을 명시해 서로 맞춥니다.
+ * - IPv4 강제/재시도/에러 메시지 포함
  * ----------------------- */
-$url = 'http://127.0.0.1:5000/info?sid=' . urlencode($sid);
-if ($debug) $url .= '&log=1';
+$base = 'http://127.0.0.1:5000/info?sid=' . urlencode($sid);
+$base .= '&timeout_sec=9';       // FastAPI 전체 타임아웃 9초로 제한
+if ($debug) $base .= '&log=1';
 
-$ch = curl_init($url);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
+$headers = array(
+    'Accept: application/json',
+    'Connection: close',
+);
 
-if ($response === false || $httpCode !== 200) {
-    json_out(array(
-        'error'     => '데이터 조회 실패',
-        'http_code' => $httpCode
-    ));
+$attempts = 2;                  // 간단 재시도 2회
+$lastErr = '';
+$lastHttp = 0;
+$response = false;
+
+for ($i = 0; $i < $attempts; $i++) {
+    $url = $base; // 필요 시 시도마다 파라미터 추가 가능
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+    // 타임아웃: 연결 2초, 전체 10초 (FastAPI 9초와 정합)
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
+    // IPv6 이슈 회피 (CentOS 6에서도 동작)
+    if (defined('CURL_IPRESOLVE_V4')) {
+        curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+    }
+
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    // 재시도 시 새 연결 강제
+    if ($i > 0) {
+        curl_setopt($ch, CURLOPT_FRESH_CONNECT, true);
+        curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
+    }
+
+    $response = curl_exec($ch);
+    $lastHttp = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($response !== false && $lastHttp === 200) {
+        // 성공
+        header('Content-Type: application/json; charset=utf-8');
+        echo $response;
+        exit;
+    }
+
+    // 실패 → 에러기록 후 짧게 대기
+    $lastErr = $curlErr ? $curlErr : ('HTTP '.$lastHttp);
+    usleep(200 * 1000); // 200ms
 }
 
-/* 내부 서비스가 이미 UTF-8 JSON을 돌려준다는 가정 하에 그대로 출력 */
-header('Content-Type: application/json; charset=utf-8');
-echo $response;
+// 최종 실패 응답 (디버깅 보조 정보 포함)
+json_out(array(
+    'error'      => '데이터 조회 실패',
+    'http_code'  => $lastHttp,          // 0이면 타임아웃/접속 실패
+    'curl_error' => $lastErr,           // 원인 파악용
+    'endpoint'   => $base               // 호출했던 주소 확인용
+));
