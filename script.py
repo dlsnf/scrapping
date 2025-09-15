@@ -8,20 +8,23 @@ import pytz
 from lxml import html
 from pyppeteer import launch
 from websockets.exceptions import ConnectionClosedError
+from pyppeteer.errors import NetworkError
 
 # ========== 환경 ==========
-MAX_CONCURRENCY       = int(os.getenv("MAX_CONCURRENCY", "1"))      # 1GB 서버 권장 1
-QUEUE_TIMEOUT         = float(os.getenv("QUEUE_TIMEOUT", "3.0"))
-NAV_TIMEOUT_DEFAULT   = int(os.getenv("NAV_TIMEOUT_MS", "9000"))    # 시도별 네비 상한(ms)
-NAV_MIN_TIMEOUT_MS    = int(os.getenv("NAV_MIN_TIMEOUT_MS", "2500"))# 시도별 네비 하한(ms)
-CSR_RETRY             = int(os.getenv("CSR_RETRY", "3"))            # 데이터 없을 때 재시도 횟수
-CSR_RETRY_DELAY       = float(os.getenv("CSR_RETRY_DELAY", "1.0"))  # 재시도 간격(초)
-CACHE_TTL_SEC         = int(os.getenv("CACHE_TTL_SEC", "60"))       # sid 캐시 TTL (1분)
-MAX_CACHE_ENTRIES     = int(os.getenv("MAX_CACHE_ENTRIES", "10"))   # 캐시 상한 (10개)
-LAUNCH_TIMEOUT_SEC    = float(os.getenv("LAUNCH_TIMEOUT_SEC", "8.0"))  # 콜드런치 상한
-BROWSER_COOLDOWN_SEC  = int(os.getenv("BROWSER_COOLDOWN_SEC", "8"))    # 쿨다운 단축
+MAX_CONCURRENCY       = int(os.getenv("MAX_CONCURRENCY", "1"))
+QUEUE_TIMEOUT         = float(os.getenv("QUEUE_TIMEOUT", "6.0"))
+NAV_TIMEOUT_DEFAULT   = int(os.getenv("NAV_TIMEOUT_MS", "9000"))     # goto/reload 상한
+NAV_MIN_TIMEOUT_MS    = int(os.getenv("NAV_MIN_TIMEOUT_MS", "3500")) # goto/reload 하한
+POLL_INTERVAL_SEC     = float(os.getenv("POLL_INTERVAL_SEC", "0.5")) # 500ms
+POLL_WINDOW_SEC       = float(os.getenv("POLL_WINDOW_SEC", "5.0"))   # 5초
+CACHE_TTL_SEC         = int(os.getenv("CACHE_TTL_SEC", "60"))        # 1분 캐시
+MAX_CACHE_ENTRIES     = int(os.getenv("MAX_CACHE_ENTRIES", "10"))    # 10개 제한
+LAUNCH_TIMEOUT_SEC    = float(os.getenv("LAUNCH_TIMEOUT_SEC", "8.0"))
+BROWSER_COOLDOWN_SEC  = int(os.getenv("BROWSER_COOLDOWN_SEC", "8"))
 MAX_PAGES_PER_BROWSER = int(os.getenv("MAX_PAGES_PER_BROWSER", "300"))
 CHROME_BIN            = os.getenv("CHROME_BIN", "/usr/bin/chromium")
+STALE_KILL_SEC        = int(os.getenv("STALE_KILL_SEC", "10"))
+STALE_RELEASE_WAIT    = float(os.getenv("STALE_RELEASE_WAIT", "2.0"))
 
 # ========== 전역 ==========
 browser = None
@@ -29,31 +32,26 @@ log_enabled = False
 _init_lock = asyncio.Lock()
 _sem = asyncio.Semaphore(MAX_CONCURRENCY)
 _sid_locks: Dict[str, asyncio.Lock] = {}
-
-# 캐시: sid -> (ts, payload)
 _cache: Dict[str, Tuple[float, dict]] = {}
-
 _launch_future: Optional[asyncio.Future] = None
 _last_launch_fail_ts: float = 0.0
 _page_counter: int = 0
+_inflight: Dict[str, Tuple[asyncio.Task, float]] = {}
 
 # ========== 도우미 ==========
 class OverCapacityError(RuntimeError): pass
 def _now_s(): return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 def log(msg: str):
-    if log_enabled: print(f"[LOG {_now_s()}] {msg}")
+    if log_enabled: print(f"[LOG {_now_s()}] {msg}", flush=True)
 
 class Trace:
     def __init__(self, enabled: bool):
-        self.enabled = enabled
-        self.t0 = time.time()
-        self.rid = f"{int(self.t0)%100000}-{uuid.uuid4().hex[:6]}"
-        self.events: List[dict] = []
+        self.enabled = enabled; self.t0 = time.time()
+        self.rid = f"{int(self.t0)%100000}-{uuid.uuid4().hex[:6]}"; self.events: List[dict] = []
     def mark(self, name: str, **kw):
         if not self.enabled: return
         t = time.time() - self.t0
-        ev = {"t": round(t,3), "ev": name}; ev.update(kw)
-        self.events.append(ev)
+        ev = {"t": round(t,3), "ev": name}; ev.update(kw); self.events.append(ev)
         parts = [f"[RID {self.rid}] {name} @ {t:.3f}s"] + [f"{k}={v}" for k,v in kw.items()]
         log(" | ".join(parts))
     def export(self): return self.events
@@ -61,8 +59,8 @@ class Trace:
 def _compute_nav_timeout(remaining_sec: float, attempts_left: int) -> int:
     if attempts_left <= 0: attempts_left = 1
     ms = int((max(0.0, remaining_sec) - 0.5) * 1000 / attempts_left)
-    ms = max(NAV_MIN_TIMEOUT_MS, ms)              # 최소 2.5s
-    return min(NAV_TIMEOUT_DEFAULT, ms)           # 최대 9s
+    ms = max(NAV_MIN_TIMEOUT_MS, ms)
+    return min(NAV_TIMEOUT_DEFAULT, ms)
 
 # ========== 파싱 유틸 ==========
 def compute_date_finish_info(s: str) -> str:
@@ -150,9 +148,8 @@ def _parse_html_to_payload(html_content: str, started_at: float) -> dict:
         "msg": "SUCCESS", "total_time": f"{time.time() - started_at:.2f} seconds"
     }
 
-# ========== 브라우저 관리 (단일 런치 + 쿨다운, 웜업 실패는 쿨다운 미적용) ==========
-async def background_warmup():
-    # 웜업 실패는 쿨다운 갱신 없이 조용히 재시도
+# ========== 브라우저 관리 ==========
+async def background_warmup():  # 현재 미사용
     tries = 0
     while tries < 5 and browser is None:
         try:
@@ -160,45 +157,35 @@ async def background_warmup():
             return
         except Exception:
             tries += 1
-            await asyncio.sleep(2 * tries)  # 2,4,6,8,...
+            await asyncio.sleep(2 * tries)
 
 async def init_browser(tr: Trace, max_wait_sec: Optional[float] = None,
                        set_cooldown_on_fail: bool = True, allow_cooldown_override: bool = False):
-    """
-    전역 싱글톤 런치.
-    - 중복 시도 방지(공유 Future)
-    - 실패 시 쿨다운(BROWSER_COOLDOWN_SEC). 단, set_cooldown_on_fail=False면 갱신 안 함(웜업용).
-    - 호출자별 대기 상한(max_wait_sec)
-    - allow_cooldown_override=True면 쿨다운 중에도 1회 즉시 재런치 허용(중복 런치 방지 전제)
-    """
     global browser, _launch_future, _last_launch_fail_ts
-
     if browser is not None:
         return browser
 
     now = time.time()
     cd_left = BROWSER_COOLDOWN_SEC - (now - _last_launch_fail_ts)
     if cd_left > 0:
-        # 쿨다운 중: 이미 런치 중이거나 override 불가하면 503 처리
         if not allow_cooldown_override or (_launch_future and not _launch_future.done()):
             raise OverCapacityError("브라우저 재기동 쿨다운 중")
 
-    # 이미 런치 중이면 그 Future만 기다림
     if _launch_future and not _launch_future.done():
         to = max_wait_sec or LAUNCH_TIMEOUT_SEC
         try:
-            browser = await asyncio.wait_for(_launch_future, timeout=to)
+            browser_r = await asyncio.wait_for(asyncio.shield(_launch_future), timeout=to)
+            browser = browser_r
             tr.mark("browser_launch_done"); log("브라우저 초기화 완료")
             return browser
         except asyncio.TimeoutError:
             raise OverCapacityError("브라우저 기동 중(대기 초과)")
 
     async with _init_lock:
-        if browser is not None:
-            return browser
+        if browser is not None: return browser
         if _launch_future and not _launch_future.done():
             to = max_wait_sec or LAUNCH_TIMEOUT_SEC
-            return await asyncio.wait_for(_launch_future, timeout=to)
+            return await asyncio.wait_for(asyncio.shield(_launch_future), timeout=to)
 
         tr.mark("browser_launch_start"); log("브라우저 초기화 시도")
 
@@ -229,17 +216,17 @@ async def init_browser(tr: Trace, max_wait_sec: Optional[float] = None,
 
     to = max_wait_sec or LAUNCH_TIMEOUT_SEC
     try:
-        browser = await asyncio.wait_for(_launch_future, timeout=to)
-        tr.mark("browser_launch_done"); log("브라우저 초기화 완료")
+        browser_r = await asyncio.wait_for(asyncio.shield(_launch_future), timeout=to)
+        browser = browser_r; tr.mark("browser_launch_done"); log("브라우저 초기화 완료")
         return browser
+    except asyncio.CancelledError:
+        raise
     except Exception:
         if set_cooldown_on_fail:
-            _last_launch_fail_ts = time.time()      # 실패 기록 → 쿨다운
+            _last_launch_fail_ts = time.time()
         try:
-            if _launch_future and not _launch_future.done():
-                _launch_future.cancel()
-        except Exception:
-            pass
+            if _launch_future and not _launch_future.done(): _launch_future.cancel()
+        except Exception: pass
         _launch_future = None
         raise OverCapacityError("브라우저 기동 실패")
 
@@ -248,46 +235,33 @@ async def _on_browser_disconnected():
     log("브라우저 연결 종료 감지 → 재기동 예정")
     try:
         if browser: await browser.close()
-    except Exception:
-        pass
-    browser = None
-    _last_launch_fail_ts = time.time()          # 끊겼으면 잠시 쿨다운
+    except Exception: pass
+    browser = None; _last_launch_fail_ts = time.time()
     try:
-        if _launch_future and not _launch_future.done():
-            _launch_future.cancel()
-    except Exception:
-        pass
+        if _launch_future and not _launch_future.done(): _launch_future.cancel()
+    except Exception: pass
     _launch_future = None
 
 async def _recycle_browser():
-    """오래 달린 브라우저를 예방적으로 재기동 (순차 재시작)"""
     global browser, _launch_future, _last_launch_fail_ts
     b_old = browser
-    if not b_old:
-        return
+    if not b_old: return
     try:
-        # 구 브라우저를 닫고 새로 런치
         await b_old.close()
-    except Exception:
-        pass
-    browser = None
-    _last_launch_fail_ts = 0  # 재활용은 쿨다운 없이 시도
+    except Exception: pass
+    browser = None; _last_launch_fail_ts = 0
     try:
         await init_browser(Trace(False), max_wait_sec=LAUNCH_TIMEOUT_SEC,
                            set_cooldown_on_fail=False, allow_cooldown_override=True)
-    except Exception:
-        # 실패해도 서비스 계속
-        pass
+    except Exception: pass
 
 async def _new_page(nav_timeout_ms: int, tr: Trace, max_launch_wait_sec: float):
     global _page_counter
     br = await init_browser(tr, max_wait_sec=max_launch_wait_sec,
                             set_cooldown_on_fail=True, allow_cooldown_override=True)
-    p = await br.newPage()
-    _page_counter += 1
+    p = await br.newPage(); _page_counter += 1
     if _page_counter >= MAX_PAGES_PER_BROWSER:
-        _page_counter = 0
-        asyncio.create_task(_recycle_browser())
+        _page_counter = 0; asyncio.create_task(_recycle_browser())
 
     tr.mark("new_page")
     await p.setUserAgent(
@@ -308,7 +282,7 @@ async def _new_page(nav_timeout_ms: int, tr: Trace, max_launch_wait_sec: float):
                 await req.continue_()
         except Exception:
             pass
-    p.on("request", lambda r: asyncio.ensure_future(_on_req(r)))
+    p.on("request", lambda r: asyncio.create_task(_on_req(r)))
     return p
 
 # --- XHR(JSON) 스니핑 ---
@@ -322,12 +296,14 @@ async def _capture_json_response(resp, store: List[Tuple[str, Any]], tr: Trace):
             store.append((resp.url, data))
             if tr.enabled:
                 tr.mark("xhr_json", url=resp.url, size=len(json.dumps(data, ensure_ascii=False)))
+    except (NetworkError, ConnectionClosedError, asyncio.CancelledError):
+        return
     except Exception as e:
         if tr.enabled:
             tr.mark("xhr_json_err", err=str(e))
 
 def _try_parse_from_json(blobs: List[Tuple[str, Any]], started_at: float) -> Optional[dict]:
-    for url, data in blobs:
+    for _, data in blobs:
         candidates = []
         if isinstance(data, list):
             candidates.append(data)
@@ -366,120 +342,143 @@ def _try_parse_from_json(blobs: List[Tuple[str, Any]], started_at: float) -> Opt
                 }
     return None
 
-# ========== CSR 전용 수집(재시도 포함) ==========
-def _compute_nav_ms(remaining: float, attempt: int, attempts_left: int) -> int:
-    return _compute_nav_timeout(remaining, attempts_left)
+# ========== 폴링 보조 ==========
+async def _poll_for_rows(page, json_blobs, started_at, max_poll_sec: float, interval_sec: float, tr: Trace) -> Optional[dict]:
+    """
+    페이지를 새로고침하지 않고, interval_sec 간격으로 최대 max_poll_sec 만큼
+    - XHR JSON 스니핑 결과 먼저 확인
+    - DOM에 행 생성 여부 빠르게 확인 → 있으면 content() 딱 1번 가져와 파싱
+    """
+    deadline = time.time() + max(0.0, max_poll_sec)
+    tick = 0
+    while time.time() < deadline:
+        tick += 1
+        # 1) JSON 먼저
+        parsed = _try_parse_from_json(json_blobs, started_at)
+        if parsed:
+            tr.mark("poll_json_hit", tick=tick)
+            return parsed
 
+        # 2) DOM에 행이 생겼는지 경량 체크
+        try:
+            ok = await page.evaluate("""
+                () => {
+                  const q = document.querySelectorAll('.table01 tbody tr');
+                  if (q && q.length>0) return true;
+                  const a = document.querySelectorAll('.tbl_list tbody tr, .tbl tbody tr');
+                  return !!(a && a.length>0);
+                }
+            """)
+        except Exception:
+            ok = False
+
+        if ok:
+            html_content = await page.content()
+            if ("<tbody" in html_content) and ("table" in html_content):
+                tr.mark("poll_dom_hit", tick=tick, size=len(html_content))
+                return _parse_html_to_payload(html_content, started_at)
+
+        await asyncio.sleep(interval_sec)
+
+    tr.mark("poll_timeout", sec=max_poll_sec)
+    return None
+
+# ========== CSR 수집(폴링 + 1회 리로드) ==========
 async def _browser_fetch_and_parse(sid: str, started_at: float, timeout_sec: int, tr: Trace) -> dict:
     url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
     deadline = time.time() + timeout_sec
-    attempt = 0
     last_err: Optional[str] = None
-
     page = None
     json_blobs: List[Tuple[str, Any]] = []
 
     try:
-        while attempt < CSR_RETRY:
-            attempt += 1
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                raise asyncio.TimeoutError("예산 소진")
+        # ---- 1) 첫 진입 ----
+        remaining = deadline - time.time()
+        if remaining <= 0: raise asyncio.TimeoutError("예산 소진")
+        nav_ms = max(NAV_MIN_TIMEOUT_MS, min(NAV_TIMEOUT_DEFAULT, int((remaining - 0.5) * 1000 * 0.5)))
+        max_launch_wait = min(LAUNCH_TIMEOUT_SEC, max(3.0, remaining * 0.6))
+        page = await _new_page(nav_timeout_ms=nav_ms, tr=tr, max_launch_wait_sec=max_launch_wait)
 
-            # 남은 예산이 3.5초 미만이면 이번 라운드에 단일 시도만 수행
-            attempts_left = max(1, CSR_RETRY - attempt + 1)
-            if remaining < 3.5:
-                attempts_left = 1
+        # response 스니퍼 등록(예외 흡수)
+        def _spawn(resp):
+            task = asyncio.create_task(_capture_json_response(resp, json_blobs, tr))
+            task.add_done_callback(lambda f: f.exception() and None)
+        page.on("response", _spawn)
 
-            nav_ms = _compute_nav_ms(remaining, attempt, attempts_left)
+        t0 = time.time()
+        try:
+            await page.goto(url, {"waitUntil": "domcontentloaded", "timeout": nav_ms})
+            tr.mark("goto_done", dt=round(time.time()-t0,3), nav_ms=nav_ms)
+        except Exception as e:
+            last_err = f"nav1:{e}"
+            tr.mark("nav1_error", err=str(e))
+        else:
+            # 폴링 창은 남은 예산 안에서 5초를 넘지 않도록 조절
+            rem = deadline - time.time()
+            poll_window = min(POLL_WINDOW_SEC, max(0.5, rem - 1.0))
+            got = await _poll_for_rows(page, json_blobs, started_at, poll_window, POLL_INTERVAL_SEC, tr)
+            if got:
+                return got
 
-            # 첫 시도 & 아직 브라우저 없음이면 런치 대기에 더 많은 예산 할당(최대 70%)
-            need_launch = (browser is None)
-            if need_launch and attempt == 1:
-                max_launch_wait = min(LAUNCH_TIMEOUT_SEC, max(3.0, remaining * 0.7))
-            else:
-                max_launch_wait = min(3.0, max(1.5, remaining * 0.3))
+        # ---- 2) 1회 리로드 후 동일 폴링 ----
+        rem = deadline - time.time()
+        if rem <= 1.0:
+            raise asyncio.TimeoutError("예산 소진(리로드 전)")
+        nav_ms2 = max(NAV_MIN_TIMEOUT_MS, min(NAV_TIMEOUT_DEFAULT, int((rem - 0.3) * 1000 * 0.5)))
+        try:
+            await page.reload({"waitUntil": "domcontentloaded", "timeout": nav_ms2})
+            tr.mark("reload_done", nav_ms=nav_ms2)
+        except Exception as e:
+            last_err = f"nav2:{e}"
+            tr.mark("nav2_error", err=str(e))
+        else:
+            rem2 = deadline - time.time()
+            poll_window2 = min(POLL_WINDOW_SEC, max(0.5, rem2 - 0.5))
+            got2 = await _poll_for_rows(page, json_blobs, started_at, poll_window2, POLL_INTERVAL_SEC, tr)
+            if got2:
+                return got2
 
-            if page is None:
-                page = await _new_page(nav_timeout_ms=nav_ms, tr=tr, max_launch_wait_sec=max_launch_wait)
-                page.on("response", lambda r: asyncio.ensure_future(_capture_json_response(r, json_blobs, tr)))
-
-            # 이동 또는 새로고침
-            t0 = time.time()
-            try:
-                if attempt == 1:
-                    await page.goto(url, {"waitUntil": "domcontentloaded", "timeout": nav_ms})
-                else:
-                    await page.reload({"waitUntil": "domcontentloaded", "timeout": nav_ms})
-                tr.mark("goto_or_reload", attempt=attempt, dt=round(time.time()-t0,3), nav_ms=nav_ms)
-            except Exception as e:
-                last_err = f"nav:{e}"
-                tr.mark("nav_error", attempt=attempt, err=str(e))
-                await asyncio.sleep(0.2)
-                continue
-
-            # 1) 표식 대기 (대체 셀렉터 포함)
-            t1 = time.time()
-            try:
-                await page.waitForSelector("#form, .table01, .tbl_list, .tbl", {"timeout": min(2000, nav_ms)})
-                tr.mark("wait_selector", dt=round(time.time()-t1,3))
-            except Exception:
-                tr.mark("wait_selector_miss")
-
-            # 2) 행 대기
-            row_wait_js = """
-              (function(){
-                var q = document.querySelectorAll('.table01 tbody tr');
-                if (q && q.length>0) return true;
-                var a = document.querySelectorAll('.tbl_list tbody tr, .tbl tbody tr');
-                return (a && a.length>0);
-              })()
-            """
-            try:
-                await page.waitForFunction(row_wait_js, {"timeout": min(2500, nav_ms)})
-                tr.mark("wait_rows_ok")
-            except Exception:
-                tr.mark("wait_rows_miss")
-
-            # 3) DOM 파싱 시도
-            html_content = await page.content()
-            if ("<tbody" in html_content) and ("table" in html_content):
-                tr.mark("browser_parse_start", size=len(html_content))
-                payload = _parse_html_to_payload(html_content, started_at)
-                if payload.get("total_chargers", 0) > 0 or payload.get("chargers_info"):
-                    tr.mark("browser_parse_done")
-                    return payload
-                else:
-                    last_err = "empty_payload"
-                    tr.mark("browser_empty_payload")
-
-            # 4) JSON 폴백 (XHR 스니핑)
-            parsed = _try_parse_from_json(json_blobs, started_at)
-            if parsed:
-                tr.mark("json_parsed")
-                return parsed
-
-            # 5) 원하는 값이 없으면 1초 대기 후 재시도
-            if attempt < CSR_RETRY:
-                tr.mark("retry_wait", sec=CSR_RETRY_DELAY)
-                await asyncio.sleep(CSR_RETRY_DELAY)
-
-        raise RuntimeError(f"CSR 재시도 실패: {last_err or '데이터 미발견'}")
+        raise RuntimeError(f"CSR 폴링 실패: {last_err or '데이터 미발견'}")
 
     finally:
         if page:
-            try: await page.close()
-            except Exception: pass
+            try:
+                await asyncio.sleep(0.05)  # 콜백 마무리 여유
+                await page.close()
+            except Exception:
+                pass
 
-# ========== 캐시(1분 TTL, 최대 10개) / 동시성 / 엔트리 ==========
+# ========== inflight/캐시/동시성 ==========
+async def _maybe_cancel_stale(sid: str, tr: Trace) -> bool:
+    ent = _inflight.get(sid)
+    if not ent: return False
+    task, started = ent
+    if task.done(): return False
+    age = time.time() - started
+    if age > STALE_KILL_SEC:
+        tr.mark("cancel_stale", age=round(age,1)); task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=min(STALE_RELEASE_WAIT, max(0.5, age/4)))
+        except Exception: pass
+        return True
+    return False
+
+def _inflight_register(sid: str):
+    try: _inflight[sid] = (asyncio.current_task(), time.time())
+    except Exception: pass
+
+def _inflight_pop_if_same(sid: str):
+    try:
+        ent = _inflight.get(sid)
+        if not ent: return
+        task, _ = ent
+        if task is asyncio.current_task(): _inflight.pop(sid, None)
+    except Exception: pass
+
 def _cache_gc():
-    """TTL 만료 및 개수 상한 초과시 가장 오래된 항목부터 정리"""
     now = time.time()
-    # 1) 만료 제거
     expired = [k for k, (ts, _) in _cache.items() if (now - ts) > CACHE_TTL_SEC]
-    for k in expired:
-        _cache.pop(k, None)
-    # 2) 개수 상한
+    for k in expired: _cache.pop(k, None)
     if len(_cache) > MAX_CACHE_ENTRIES:
         to_drop = len(_cache) - MAX_CACHE_ENTRIES
         for k in sorted(_cache, key=lambda x: _cache[x][0])[:to_drop]:
@@ -487,79 +486,82 @@ def _cache_gc():
 
 def _get_sid_lock(sid: str) -> asyncio.Lock:
     lk = _sid_locks.get(sid)
-    if lk is None:
-        lk = asyncio.Lock(); _sid_locks[sid] = lk
+    if lk is None: lk = asyncio.Lock(); _sid_locks[sid] = lk
     return lk
 
 def _cache_get(sid: str) -> Optional[dict]:
     ent = _cache.get(sid)
-    if not ent:
-        _cache_gc()
-        return None
+    if not ent: _cache_gc(); return None
     ts, payload = ent
     if (time.time() - ts) > CACHE_TTL_SEC:
-        _cache.pop(sid, None)
-        _cache_gc()
-        return None
+        _cache.pop(sid, None); _cache_gc(); return None
     return payload
 
 def _cache_put(sid: str, payload: dict):
-    _cache_gc()
-    _cache[sid] = (time.time(), payload)
-    _cache_gc()
+    _cache_gc(); _cache[sid] = (time.time(), payload); _cache_gc()
 
 async def scrape_data(sid: str, timeout_sec: int = 9) -> dict:
-    started = time.time()
-    tr = Trace(log_enabled)
-    tr.mark("start", sid=sid, timeout=timeout_sec)
+    started = time.time(); deadline = started + timeout_sec
+    tr = Trace(log_enabled); tr.mark("start", sid=sid, timeout=timeout_sec)
 
-    # 캐시
     cached = _cache_get(sid)
     if cached:
         tr.mark("cache_hit")
         if log_enabled: cached["_trace"] = tr.export()
         return cached
 
-    # 동시성 게이트
-    try:
-        t0 = time.time()
-        await asyncio.wait_for(_sem.acquire(), timeout=QUEUE_TIMEOUT)
-        tr.mark("sem_acquired", wait=round(time.time()-t0,3))
-    except asyncio.TimeoutError:
-        tr.mark("sem_timeout", waited=QUEUE_TIMEOUT)
-        raise OverCapacityError("서버 혼잡: 잠시 후 다시 시도해주세요")
+    try: await _maybe_cancel_stale(sid, tr)
+    except Exception: pass
 
+    sid_lock = _get_sid_lock(sid)
     try:
-        # 동일 sid 코얼레싱
-        sid_lock = _get_sid_lock(sid)
         t1 = time.time()
-        await sid_lock.acquire()
+        await asyncio.wait_for(sid_lock.acquire(), timeout=max(0.5, timeout_sec - 0.5))
         tr.mark("sid_lock_acquired", wait=round(time.time()-t1,3))
 
-        try:
-            # 더블체크 캐시
-            c2 = _cache_get(sid)
-            if c2:
-                tr.mark("cache_hit_2")
-                if log_enabled: c2["_trace"] = tr.export()
-                return c2
+        c2 = _cache_get(sid)
+        if c2:
+            tr.mark("cache_hit_2")
+            if log_enabled: c2["_trace"] = tr.export()
+            return c2
 
-            # CSR 전용 수집
-            payload = await _browser_fetch_and_parse(sid, started, timeout_sec, tr)
+        rem = deadline - time.time(); tr.mark("budget_after_sid", rem=round(rem,3))
+        if rem <= 1.0: raise asyncio.TimeoutError("대기 중 예산 소진(sid_lock)")
+
+        _inflight_register(sid)
+        sem_acquired = False
+        try:
+            t0 = time.time()
+            await asyncio.wait_for(_sem.acquire(), timeout=min(QUEUE_TIMEOUT, max(0.1, rem - 0.5)))
+            sem_acquired = True; tr.mark("sem_acquired", wait=round(time.time()-t0,3))
+        except asyncio.TimeoutError:
+            tr.mark("sem_timeout", waited=QUEUE_TIMEOUT)
+            raise OverCapacityError("서버 혼잡: 잠시 후 다시 시도해주세요")
+
+        rem2 = deadline - time.time(); tr.mark("budget_after_sem", rem=round(rem2,3))
+        if rem2 <= 1.0: raise asyncio.TimeoutError("대기 중 예산 소진(sem)")
+
+        try:
+            try:
+                payload = await _browser_fetch_and_parse(sid, started, int(rem2), tr)
+            except RuntimeError as e:
+                if "폴링 실패" in str(e) or "CSR" in str(e):
+                    raise asyncio.TimeoutError(str(e))
+                raise
             if log_enabled: payload["_trace"] = tr.export()
-            _cache_put(sid, payload)
-            return payload
+            _cache_put(sid, payload); return payload
 
         except (pyppeteer.errors.BrowserError, ConnectionClosedError, asyncio.IncompleteReadError) as e:
-            # 브라우저 세션 단절/크래시 계열은 재기동 중 신호로 통일(503)
             raise OverCapacityError(f"브라우저 재기동 중: {e}")
         except asyncio.CancelledError:
             tr.mark("cancelled_top"); raise
         finally:
-            try: sid_lock.release()
-            except Exception: pass
+            if sem_acquired:
+                try: _sem.release()
+                except Exception: pass
     finally:
-        try: _sem.release()
+        _inflight_pop_if_same(sid)
+        try: sid_lock.release()
         except Exception: pass
         tr.mark("end")
 
@@ -572,6 +574,5 @@ async def shutdown():
     try:
         if _launch_future and not _launch_future.done():
             _launch_future.cancel()
-    except Exception:
-        pass
+    except Exception: pass
     _launch_future = None

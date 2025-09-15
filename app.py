@@ -1,54 +1,63 @@
 #!/usr/bin/env python3
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse, JSONResponse
-import asyncio
+import asyncio, time, uuid
+from fastapi import FastAPI, HTTPException, Query, Request
 import script
 
 app = FastAPI()
 
-# 항상 Connection: close (CentOS6 + 구형 cURL 호환)
+# 즉시 액세스 로그(요청이 들어왔는지 판단)
 @app.middleware("http")
-async def force_conn_close(request: Request, call_next):
-    resp = await call_next(request)
-    resp.headers["Connection"] = "close"
-    return resp
+async def access_log_immediate(request: Request, call_next):
+    rid = f"{int(time.time())%100000}-{uuid.uuid4().hex[:6]}"
+    t0 = time.time()
+    print(f'[AL {time.strftime("%Y-%m-%d %H:%M:%S")}] [RID {rid}] start {request.method} {request.url.path}?{request.query_params}', flush=True)
+    try:
+        resp = await call_next(request)
+        return resp
+    except Exception as e:
+        print(f'[AL {time.strftime("%Y-%m-%d %H:%M:%S")}] [RID {rid}] EXC {type(e).__name__}: {e}', flush=True)
+        raise
+    finally:
+        dt = time.time() - t0
+        try:
+            sc = resp.status_code  # type: ignore
+        except Exception:
+            sc = -1
+        print(f'[AL {time.strftime("%Y-%m-%d %H:%M:%S")}] [RID {rid}] end status={sc} dt={dt:.3f}s', flush=True)
+
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
 
 @app.on_event("startup")
 async def on_startup():
-    # 브라우저 웜업은 비동기로(요청 블로킹 방지, 실패해도 쿨다운 미적용)
-    asyncio.create_task(script.background_warmup())
+    # 초기 웜업 없음(요청 때 lazy launch)
+    pass
 
 @app.on_event("shutdown")
 async def on_shutdown():
     await script.shutdown()
 
-# 루트/상태/크롤러 억제
-@app.get("/", include_in_schema=False)
-async def root():
-    return JSONResponse({"status": "ok", "service": "pyppeteer-service"})
-
-@app.get("/health", include_in_schema=False)
-async def health():
-    return {"status": "ok", "service": "pyppeteer-service"}
-
-@app.get("/robots.txt", include_in_schema=False)
-async def robots():
-    return PlainTextResponse("User-agent: *\nDisallow: /\n", media_type="text/plain")
-
-# 메인 API
 @app.get("/info")
-async def get_info(sid: str, log: bool = False, timeout_sec: int = 9):
+async def get_info(
+    sid: str,
+    timeout_sec: int = Query(9, ge=3, le=30),
+    log: bool = False,
+):
     if not sid:
         raise HTTPException(status_code=400, detail="sid 파라미터 필요")
+
     script.log_enabled = bool(log)
+
     try:
+        # 최상단 하드 타임아웃(php 10초보다 약간 짧게)
         return await asyncio.wait_for(
             script.scrape_data(sid, timeout_sec=timeout_sec),
-            timeout=timeout_sec
+            timeout=timeout_sec + 0.5,
         )
-    except script.OverCapacityError as e:
-        raise HTTPException(status_code=503, detail=str(e))
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="요청 타임아웃")
+    except script.OverCapacityError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
