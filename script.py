@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, asyncio, time, re, uuid, json
+import os, asyncio, time, re, uuid, json, pyppeteer
 from datetime import datetime
 from typing import Dict, Tuple, Optional, Any, List
 import pytz
 from lxml import html
 from pyppeteer import launch
+from websockets.exceptions import ConnectionClosedError
 
 # ========== 환경 ==========
-MAX_CONCURRENCY       = int(os.getenv("MAX_CONCURRENCY", "1"))     # 1GB 서버 권장 1
+MAX_CONCURRENCY       = int(os.getenv("MAX_CONCURRENCY", "1"))      # 1GB 서버 권장 1
 QUEUE_TIMEOUT         = float(os.getenv("QUEUE_TIMEOUT", "3.0"))
-NAV_TIMEOUT_DEFAULT   = int(os.getenv("NAV_TIMEOUT_MS", "9000"))   # 각 시도 내 네비 타임아웃(ms)
-CSR_RETRY             = int(os.getenv("CSR_RETRY", "3"))           # 데이터 없을 때 재시도 횟수
-CSR_RETRY_DELAY       = float(os.getenv("CSR_RETRY_DELAY", "1.0")) # 재시도 간격(초)
-CACHE_TTL_SEC         = int(os.getenv("CACHE_TTL_SEC", "60"))      # sid 캐시 TTL (1분)
-MAX_CACHE_ENTRIES     = int(os.getenv("MAX_CACHE_ENTRIES", "10"))  # 캐시 상한 (10개)
+NAV_TIMEOUT_DEFAULT   = int(os.getenv("NAV_TIMEOUT_MS", "9000"))    # 시도별 네비 상한(ms)
+NAV_MIN_TIMEOUT_MS    = int(os.getenv("NAV_MIN_TIMEOUT_MS", "2500"))# 시도별 네비 하한(ms)
+CSR_RETRY             = int(os.getenv("CSR_RETRY", "3"))            # 데이터 없을 때 재시도 횟수
+CSR_RETRY_DELAY       = float(os.getenv("CSR_RETRY_DELAY", "1.0"))  # 재시도 간격(초)
+CACHE_TTL_SEC         = int(os.getenv("CACHE_TTL_SEC", "60"))       # sid 캐시 TTL (1분)
+MAX_CACHE_ENTRIES     = int(os.getenv("MAX_CACHE_ENTRIES", "10"))   # 캐시 상한 (10개)
 LAUNCH_TIMEOUT_SEC    = float(os.getenv("LAUNCH_TIMEOUT_SEC", "8.0"))  # 콜드런치 상한
-BROWSER_COOLDOWN_SEC  = int(os.getenv("BROWSER_COOLDOWN_SEC", "20"))
+BROWSER_COOLDOWN_SEC  = int(os.getenv("BROWSER_COOLDOWN_SEC", "8"))    # 쿨다운 단축
+MAX_PAGES_PER_BROWSER = int(os.getenv("MAX_PAGES_PER_BROWSER", "300"))
 CHROME_BIN            = os.getenv("CHROME_BIN", "/usr/bin/chromium")
 
 # ========== 전역 ==========
@@ -32,6 +35,7 @@ _cache: Dict[str, Tuple[float, dict]] = {}
 
 _launch_future: Optional[asyncio.Future] = None
 _last_launch_fail_ts: float = 0.0
+_page_counter: int = 0
 
 # ========== 도우미 ==========
 class OverCapacityError(RuntimeError): pass
@@ -56,8 +60,9 @@ class Trace:
 
 def _compute_nav_timeout(remaining_sec: float, attempts_left: int) -> int:
     if attempts_left <= 0: attempts_left = 1
-    ms = max(1000, int((remaining_sec - 0.5) * 1000 / attempts_left))  # 0.5s 마진
-    return min(NAV_TIMEOUT_DEFAULT, ms)
+    ms = int((max(0.0, remaining_sec) - 0.5) * 1000 / attempts_left)
+    ms = max(NAV_MIN_TIMEOUT_MS, ms)              # 최소 2.5s
+    return min(NAV_TIMEOUT_DEFAULT, ms)           # 최대 9s
 
 # ========== 파싱 유틸 ==========
 def compute_date_finish_info(s: str) -> str:
@@ -134,7 +139,7 @@ def _parse_html_to_payload(html_content: str, started_at: float) -> dict:
     address = addr_nodes[0].strip() if addr_nodes else ""
 
     print_string = "\n\n".join(
-        f"{i+1}. {c['status']} ({c['dateFinishInfo']}) / {c['type']}" if c['dateFinishInfo']
+        f"{i+1}. {c['status']}({c['dateFinishInfo']}) / {c['type']}" if c['dateFinishInfo']
         else f"{i+1}. {c['status']} / {c['type']}"
         for i, c in enumerate(chargers_info)
     )
@@ -157,12 +162,14 @@ async def background_warmup():
             tries += 1
             await asyncio.sleep(2 * tries)  # 2,4,6,8,...
 
-async def init_browser(tr: Trace, max_wait_sec: Optional[float] = None, set_cooldown_on_fail: bool = True):
+async def init_browser(tr: Trace, max_wait_sec: Optional[float] = None,
+                       set_cooldown_on_fail: bool = True, allow_cooldown_override: bool = False):
     """
     전역 싱글톤 런치.
     - 중복 시도 방지(공유 Future)
     - 실패 시 쿨다운(BROWSER_COOLDOWN_SEC). 단, set_cooldown_on_fail=False면 갱신 안 함(웜업용).
     - 호출자별 대기 상한(max_wait_sec)
+    - allow_cooldown_override=True면 쿨다운 중에도 1회 즉시 재런치 허용(중복 런치 방지 전제)
     """
     global browser, _launch_future, _last_launch_fail_ts
 
@@ -170,8 +177,11 @@ async def init_browser(tr: Trace, max_wait_sec: Optional[float] = None, set_cool
         return browser
 
     now = time.time()
-    if (now - _last_launch_fail_ts) < BROWSER_COOLDOWN_SEC:
-        raise OverCapacityError("브라우저 재기동 쿨다운 중")
+    cd_left = BROWSER_COOLDOWN_SEC - (now - _last_launch_fail_ts)
+    if cd_left > 0:
+        # 쿨다운 중: 이미 런치 중이거나 override 불가하면 503 처리
+        if not allow_cooldown_override or (_launch_future and not _launch_future.done()):
+            raise OverCapacityError("브라우저 재기동 쿨다운 중")
 
     # 이미 런치 중이면 그 Future만 기다림
     if _launch_future and not _launch_future.done():
@@ -249,9 +259,36 @@ async def _on_browser_disconnected():
         pass
     _launch_future = None
 
+async def _recycle_browser():
+    """오래 달린 브라우저를 예방적으로 재기동 (순차 재시작)"""
+    global browser, _launch_future, _last_launch_fail_ts
+    b_old = browser
+    if not b_old:
+        return
+    try:
+        # 구 브라우저를 닫고 새로 런치
+        await b_old.close()
+    except Exception:
+        pass
+    browser = None
+    _last_launch_fail_ts = 0  # 재활용은 쿨다운 없이 시도
+    try:
+        await init_browser(Trace(False), max_wait_sec=LAUNCH_TIMEOUT_SEC,
+                           set_cooldown_on_fail=False, allow_cooldown_override=True)
+    except Exception:
+        # 실패해도 서비스 계속
+        pass
+
 async def _new_page(nav_timeout_ms: int, tr: Trace, max_launch_wait_sec: float):
-    br = await init_browser(tr, max_wait_sec=max_launch_wait_sec, set_cooldown_on_fail=True)
+    global _page_counter
+    br = await init_browser(tr, max_wait_sec=max_launch_wait_sec,
+                            set_cooldown_on_fail=True, allow_cooldown_override=True)
     p = await br.newPage()
+    _page_counter += 1
+    if _page_counter >= MAX_PAGES_PER_BROWSER:
+        _page_counter = 0
+        asyncio.create_task(_recycle_browser())
+
     tr.mark("new_page")
     await p.setUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -317,7 +354,7 @@ def _try_parse_from_json(blobs: List[Tuple[str, Any]], started_at: float) -> Opt
                 used = sum(1 for c in chargers_info if ("사용중" in c["status"]) or ("충전중" in c["status"]) or ("충전불가" in c["status"]))
                 remaining = total - used
                 print_string = "\n\n".join(
-                    f"{i+1}. {c['status']} ({c['dateFinishInfo']}) / {c['type']}" if c['dateFinishInfo']
+                    f"{i+1}. {c['status']}({c['dateFinishInfo']}) / {c['type']}" if c['dateFinishInfo']
                     else f"{i+1}. {c['status']} / {c['type']}"
                     for i, c in enumerate(chargers_info)
                 )
@@ -330,8 +367,8 @@ def _try_parse_from_json(blobs: List[Tuple[str, Any]], started_at: float) -> Opt
     return None
 
 # ========== CSR 전용 수집(재시도 포함) ==========
-def _compute_nav_ms(remaining: float, attempt: int) -> int:
-    return _compute_nav_timeout(remaining, max(1, CSR_RETRY - attempt + 1))
+def _compute_nav_ms(remaining: float, attempt: int, attempts_left: int) -> int:
+    return _compute_nav_timeout(remaining, attempts_left)
 
 async def _browser_fetch_and_parse(sid: str, started_at: float, timeout_sec: int, tr: Trace) -> dict:
     url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
@@ -349,7 +386,12 @@ async def _browser_fetch_and_parse(sid: str, started_at: float, timeout_sec: int
             if remaining <= 0:
                 raise asyncio.TimeoutError("예산 소진")
 
-            nav_ms = _compute_nav_ms(remaining, attempt)
+            # 남은 예산이 3.5초 미만이면 이번 라운드에 단일 시도만 수행
+            attempts_left = max(1, CSR_RETRY - attempt + 1)
+            if remaining < 3.5:
+                attempts_left = 1
+
+            nav_ms = _compute_nav_ms(remaining, attempt, attempts_left)
 
             # 첫 시도 & 아직 브라우저 없음이면 런치 대기에 더 많은 예산 할당(최대 70%)
             need_launch = (browser is None)
@@ -508,6 +550,9 @@ async def scrape_data(sid: str, timeout_sec: int = 9) -> dict:
             _cache_put(sid, payload)
             return payload
 
+        except (pyppeteer.errors.BrowserError, ConnectionClosedError, asyncio.IncompleteReadError) as e:
+            # 브라우저 세션 단절/크래시 계열은 재기동 중 신호로 통일(503)
+            raise OverCapacityError(f"브라우저 재기동 중: {e}")
         except asyncio.CancelledError:
             tr.mark("cancelled_top"); raise
         finally:
