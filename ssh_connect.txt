@@ -169,6 +169,9 @@ docker run -d --name pyppeteer-service -p 5000:5000 --memory=768m --shm-size=256
 
 
 
+# 서버에서 직접 호출(디버깅 모드)
+curl -v --http1.0 -H "Connection: close" "http://127.0.0.1:5000/info?sid=PL005189&timeout_sec=9&log=1"
+
 
 
 불필요한 컨테이너/이미지 정리 이거 하나면 됨!!
@@ -187,6 +190,9 @@ docker logs -f pyppeteer-service
 
 docker logs -f --timestamps pyppeteer-service
 
+#도커 자체 로그 tail
+tail -f /var/log/dockerd.log
+
 
 
 #이전 로그 기록 보기
@@ -202,6 +208,12 @@ curl -i 'http://localhost:5000/info?sid=PL005189&log=1'
 curl -sS 'http://localhost:5000/health'
 
 curl -s -H 'X-Debug:1' 'http://hansbuild.cafe24.com/scrapping/get_info.php?sid=PL005189' | jq .
+
+
+
+
+
+
 
 
 

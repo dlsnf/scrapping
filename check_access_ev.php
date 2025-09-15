@@ -55,7 +55,7 @@ function check_access_inline_ev($category, $product, $key, $format /* 'text' 또
     $req_cnt  = (int)$row['request_count_today'];
     if ($req_date !== $today) { $req_cnt = 0; }
 
-    if ($req_cnt >= 50) {
+    if ($req_cnt >= 100) {
         return '오늘은 더이상 이용할 수 없습니다.';
     }
 
