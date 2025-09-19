@@ -165,8 +165,18 @@ docker build --no-cache -t pyppeteer-service:latest .
 
 
 # 3) 컨테이너 재실행
+docker run -d --name pyppeteer-service --restart=always --shm-size=1g pyppeteer-service:latest sleep infinity
+
+
+
+
+
 docker run -d --name pyppeteer-service -p 5000:5000 --memory=768m --shm-size=256m --restart=unless-stopped pyppeteer-service:latest
 
+docker run -d --name pyppeteer-service -p 5000:5000 --memory=768m --shm-size=1g --restart=unless-stopped pyppeteer-service:latest
+
+
+docker run -d --name pyppeteer-service -p 5000:5000 --restart=unless-stopped --shm-size=1g -e LAUNCH_TIMEOUT_SEC=40 pyppeteer-service:latest
 
 
 # 서버에서 직접 호출(디버깅 모드)
@@ -178,6 +188,10 @@ curl -v --http1.0 -H "Connection: close" "http://127.0.0.1:5000/info?sid=PL00518
 docker system prune -af
 
 
+//터미널 모든 내용 지우기
+clear && printf '\e[3J'
+
+
 
 
 
@@ -186,8 +200,6 @@ docker system prune -af
 
 #
 도커 로그 팔로우 (터미널 새창에서 실행 추천)
-docker logs -f pyppeteer-service
-
 docker logs -f --timestamps pyppeteer-service
 
 #도커 자체 로그 tail

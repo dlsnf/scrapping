@@ -1,134 +1,96 @@
 <?php
-// 파일: /scrapping/get_ev_info.php
-// 목적: 외부 호출 엔드포인트 (ev 전용 DB 사용 + 접근 체크 include)
-
 require_once __DIR__ . '/db_ev.php';
 require_once __DIR__ . '/check_access_ev.php';
 
-/* -----------------------
- * JSON 한글 깨짐 방지(php5.3)
- * ----------------------- */
+/* ---------- JSON 한글 깨짐 방지 ---------- */
 if (!function_exists('json_encode_utf8')) {
     function json_encode_utf8($data) {
         $json = json_encode($data);
         if ($json === false) return 'null';
         return preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', function($m){
             $code = hexdec($m[1]);
-            if ($code < 0x80) {
-                return chr($code);
-            } elseif ($code < 0x800) {
-                return chr(0xC0 | ($code >> 6)) .
-                       chr(0x80 | ($code & 0x3F));
-            } else {
-                return chr(0xE0 | ($code >> 12)) .
-                       chr(0x80 | (($code >> 6) & 0x3F)) .
-                       chr(0x80 | ($code & 0x3F));
-            }
+            if ($code < 0x80) return chr($code);
+            if ($code < 0x800) return chr(0xC0|($code>>6)).chr(0x80|($code&0x3F));
+            return chr(0xE0|($code>>12)).chr(0x80|(($code>>6)&0x3F)).chr(0x80|($code&0x3F));
         }, $json);
     }
 }
-function json_out($arr) {
+
+/* ---------- 상태코드 전송 (PHP 5.3용) ---------- */
+function send_status($code) {
+    $texts = array(200=>'OK',400=>'Bad Request',403=>'Forbidden',404=>'Not Found',500=>'Internal Server Error',502=>'Bad Gateway',504=>'Gateway Timeout');
+    $proto = isset($_SERVER['SERVER_PROTOCOL']) ? $_SERVER['SERVER_PROTOCOL'] : 'HTTP/1.1';
+    $text  = isset($texts[$code]) ? $texts[$code] : '';
+    header($proto . ' ' . $code . ' ' . $text);
+}
+function json_out($arr, $code=200) {
+    send_status($code);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode_utf8($arr);
     exit;
 }
 
-/* -----------------------
- * 파라미터
- * ----------------------- */
+/* ---------- 파라미터/체크 ---------- */
 $sid      = isset($_GET['sid']) ? trim($_GET['sid']) : '';
 $category = isset($_GET['category']) ? trim($_GET['category']) : '';
 $key      = isset($_GET['key']) ? strtoupper(trim($_GET['key'])) : '';
-$debug    = (
-    (isset($_GET['debug']) && $_GET['debug']==='1') ||
-    (isset($_SERVER['HTTP_X_DEBUG']) && $_SERVER['HTTP_X_DEBUG']==='1')
-);
+$debug    = ((isset($_GET['debug']) && $_GET['debug']==='1') || (isset($_SERVER['HTTP_X_DEBUG']) && $_SERVER['HTTP_X_DEBUG']==='1'));
 
-/* -----------------------
- * 필수 체크
- * ----------------------- */
 if ($sid==='' || $category==='' || $key==='') {
-    json_out(array(
-        'error'     => '필수 파라미터 누락: sid, category, key',
-        'http_code' => 400
-    ));
+    json_out(array('error'=>'필수 파라미터 누락: sid, category, key','http_code'=>400),400);
 }
-
-/* -----------------------
- * 접근 체크
- * ----------------------- */
-$chk = check_access_inline_ev($category, $sid, $key, 'text');
+$chk = check_access_inline_ev($category,$sid,$key,'text');
 if ($chk !== 'access') {
-    json_out(array(
-        'error'     => $chk,
-        'http_code' => 403
-    ));
+    json_out(array('error'=>$chk,'http_code'=>403),403);
 }
 
-/* -----------------------
- * 내부 FastAPI 호출
- * - PHP 타임아웃을 약간 늘리고(10초),
- * - FastAPI에 timeout_sec=9로 상한을 명시해 서로 맞춥니다.
- * - IPv4 강제/재시도/에러 메시지 포함
- * ----------------------- */
-$base = 'http://127.0.0.1:5000/info?sid=' . urlencode($sid);
-$base .= '&timeout_sec=9';       // FastAPI 전체 타임아웃 9초로 제한
-if ($debug) $base .= '&log=1';
+/* ---------- docker exec 명령 구성 ---------- */
+$container = 'pyppeteer-service';   // 실제 컨테이너 이름 확인!
+$timeout_s = 15;                    // script.py --timeout 값
+$cmd = 'docker exec ' . escapeshellarg($container)
+     . ' python3 /app/script.py'
+     . ' --sid=' . escapeshellarg($sid)
+     . ' --timeout=' . (int)$timeout_s;
+if ($debug) $cmd .= ' --log=1';
 
-$headers = array(
-    'Accept: application/json',
-    'Connection: close',
+if (is_executable('/usr/bin/timeout')) {
+    // docker exec 전체를 외부에서 한 번 더 감싸 타임아웃 보호
+    $cmd = '/usr/bin/timeout ' . (int)($timeout_s + 3) . 's ' . $cmd;
+}
+
+/* ---------- proc_open으로 실행(Exit code/STDERR 분리) ---------- */
+$descriptors = array(
+    0 => array('pipe','r'),
+    1 => array('pipe','w'),
+    2 => array('pipe','w'),
 );
+$proc = proc_open($cmd, $descriptors, $pipes);
+if (!is_resource($proc)) {
+    json_out(array('error'=>'실행 시작 실패','cmd'=>$cmd),500);
+}
+fclose($pipes[0]); // stdin 닫기
 
-$attempts = 2;                  // 간단 재시도 2회
-$lastErr = '';
-$lastHttp = 0;
-$response = false;
+$stdout = stream_get_contents($pipes[1]); fclose($pipes[1]);
+$stderr = stream_get_contents($pipes[2]); fclose($pipes[2]);
 
-for ($i = 0; $i < $attempts; $i++) {
-    $url = $base; // 필요 시 시도마다 파라미터 추가 가능
+$status = proc_close($proc);
+$body   = trim($stdout !== '' ? $stdout : $stderr);
 
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-    // 타임아웃: 연결 2초, 전체 10초 (FastAPI 9초와 정합)
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-
-    // IPv6 이슈 회피 (CentOS 6에서도 동작)
-    if (defined('CURL_IPRESOLVE_V4')) {
-        curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
-    }
-
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    // 재시도 시 새 연결 강제
-    if ($i > 0) {
-        curl_setopt($ch, CURLOPT_FRESH_CONNECT, true);
-        curl_setopt($ch, CURLOPT_FORBID_REUSE, true);
-    }
-
-    $response = curl_exec($ch);
-    $lastHttp = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlErr  = curl_error($ch);
-    curl_close($ch);
-
-    if ($response !== false && $lastHttp === 200) {
-        // 성공
-        header('Content-Type: application/json; charset=utf-8');
-        echo $response;
-        exit;
-    }
-
-    // 실패 → 에러기록 후 짧게 대기
-    $lastErr = $curlErr ? $curlErr : ('HTTP '.$lastHttp);
-    usleep(200 * 1000); // 200ms
+/* ---------- JSON 여부 판별 후 반환 ---------- */
+if ($body !== '' && ($body[0] === '{' || $body[0] === '[')) {
+    send_status(200);
+    header('Content-Type: application/json; charset=utf-8');
+    echo $body;
+    exit;
 }
 
-// 최종 실패 응답 (디버깅 보조 정보 포함)
+$http = ($status === 124 ? 504 : ($status ? 502 : 500));
 json_out(array(
-    'error'      => '데이터 조회 실패',
-    'http_code'  => $lastHttp,          // 0이면 타임아웃/접속 실패
-    'curl_error' => $lastErr,           // 원인 파악용
-    'endpoint'   => $base               // 호출했던 주소 확인용
-));
+    'error'    => '비정상 응답',
+    'http_code'=> $http,
+    'exit'     => $status,
+    'output'   => mb_substr($body, 0, 2000, 'UTF-8'),
+    'cmd'      => $cmd
+), $http);
+
+?>
