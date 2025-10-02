@@ -1,35 +1,45 @@
-FROM python:3.7-slim-buster
+FROM python:3.7.12-slim-buster
+
+# 아카이브 저장소로 sources.list 수정 (Buster EOL 대응)
+RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list \
+    && sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list \
+    && sed -i '/buster-updates/d' /etc/apt/sources.list \
+    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/10no-check-valid-until
+
+# 시스템 의존성 설치
+RUN apt-get update --allow-releaseinfo-change && apt-get install -y \
+    wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+    && apt-get update --allow-releaseinfo-change \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 패키지 설치 (pip 업그레이드)
+RUN pip install --upgrade pip
+
+# Pyppeteer 설치 (Chromium 다운로드 스킵)
+ENV PYPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+RUN pip install pyppeteer==0.2.6
+
+# Flask 및 의존성 설치
+RUN pip install flask==1.1.4
+
+# MarkupSafe 다운그레이드 (Jinja2 호환)
+RUN pip install markupsafe==2.0.1
+
+# 기타 패키지
+RUN pip install beautifulsoup4==4.9.3
+RUN pip install pytz==2021.1
+
+# 작업 디렉토리
 WORKDIR /app
 
-# buster EOL 미러
-RUN sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list \
- && sed -i '/deb-src/d' /etc/apt/sources.list
-
-# 최소 시스템 패키지 + 크로미움
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates \
-      fonts-liberation \
-      libasound2 \
-      libdbus-glib-1-2 \
-      libxcomposite1 \
-      libxcursor1 \
-      libxdamage1 \
-      libxrandr2 \
-      libxss1 \
-      libxtst6 \
-      xdg-utils \
-      chromium \
-      libx11-6 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-      libpango-1.0-0 libgtk-3-0 libgbm1 \
- && rm -rf /var/lib/apt/lists/*
-
-# 파이썬 패키지 (서버 프레임워크 없음)
-RUN python3 -m ensurepip --upgrade && \
-    python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir pyppeteer lxml pytz
-
-ENV CHROME_BIN=/usr/bin/chromium
+# 소스 복사 (script.py로 변경)
 COPY script.py .
 
-# 컨테이너는 가볍게 대기 (php에서 docker exec로 script.py 호출)
-CMD ["bash","-lc","exec tail -f /dev/null"]
+# 포트 노출
+EXPOSE 8000
+
+# 서버 실행 (script.py로 변경)
+CMD ["python", "script.py"]

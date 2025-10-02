@@ -3,6 +3,8 @@
 22
 
 
+
+
 //서버 정보
 centOS 6.10 
 아파치 2.2.15
@@ -160,23 +162,16 @@ docker exec -it pyppeteer-service \python /app/script.py --sid PL005189 --log
 # 1) 컨테이너 내리기
 docker stop pyppeteer-service && docker rm pyppeteer-service
 
-# 2) 이미지 재빌드
+# 2) 이미지 빌드
 docker build --no-cache -t pyppeteer-service:latest .
 
 
-# 3) 컨테이너 재실행
-docker run -d --name pyppeteer-service --restart=always --shm-size=1g pyppeteer-service:latest sleep infinity
+# 3) 컨테이너 실행
+docker run -d --name pyppeteer-service -p 8000:8000 --restart=always pyppeteer-service:latest
 
 
 
 
-
-docker run -d --name pyppeteer-service -p 5000:5000 --memory=768m --shm-size=256m --restart=unless-stopped pyppeteer-service:latest
-
-docker run -d --name pyppeteer-service -p 5000:5000 --memory=768m --shm-size=1g --restart=unless-stopped pyppeteer-service:latest
-
-
-docker run -d --name pyppeteer-service -p 5000:5000 --restart=unless-stopped --shm-size=1g -e LAUNCH_TIMEOUT_SEC=40 pyppeteer-service:latest
 
 
 # 서버에서 직접 호출(디버깅 모드)
@@ -190,7 +185,6 @@ docker system prune -af
 
 //터미널 모든 내용 지우기
 clear && printf '\e[3J'
-
 
 
 
@@ -501,4 +495,1153 @@ chargers 값의 json 데이터 중에 status값이 "사용가능"이 아닌 것
 # 충전기 주소 address(String)
 class="table03" 아래 tbody 태그 아래 첫번째 tr 태그의 td 태그의 text 값
 
+# printString
+chargers_info 의 갯수별로 번호를 적어서 함
+1. {chargers_info의 status값}\n({chargers_info의 dateFinish값을 현재시간 기준(서울) 차이 값으로}) / {chargers_info의 type값}
+2. {chargers_info의 status값}\n({chargers_info의 dateFinish값을 현재시간 기준(서울) 차이 값으로}) / {chargers_info의 type값}
 
+예시)1. 충전가능\n(6시간 5분 전 종료) / 완속(7kW 단독)\n\n2. 충전중\n(3시간 52분) / 완속(7kW 단독)
+
+# total_time
+서비스 호출 후 반환때까지 걸린 시간
+
+
+
+###### GPT 문의 2 #####
+
+내 서버에 php 파일을 호출하여 원하는 데이터를 반환할꺼야 차근차근 해보자
+호출 url은 http://hansbuild.cafe24.com/scrapping/get_ev_status.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II&log=1 이것이고
+해당 url을 호출하면 데이터를 가져와야하는데 어떤 데이터를 가져올거냐면
+https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PL005189&pFlag=Y
+이 주소를 호출했을때 나오는 html 소스를 스크래핑하여 값을 반환할꺼야
+sid값은 get_ev_status.php 호출할때 파라미터로 넣은 sid값으로 지정해주고
+그런데 해당 스크래핑하는 목적지 url은 CSR 구조인지 url을 열고 조금 기다려야 html 소스가 모두 채워져
+그 내용이 다 채워지고 나면 스크래핑을 해서 반환해야해
+
+그리고 서비스 실행할때 해당 프로세스에 대한 tail 로그를 보는 방법도 알려주고
+그리고 도커 사용 하려고 해 컨테이너명은 pyppeteer-service 이걸로 하려고 해 전체 가이드 줘
+도커는 한번 실행되면 꺼지지 않고 계속 켜있어야해
+
+
+서비스 url을 호출하면 다음과 같은 예시 반환값이 와야해
+{ "title": "동편마을노외주차장", "company_name": "플러그링크", "total_chargers": 2, "used_chargers": 0, "remaining_chargers": 2, "address": "경기도 안양시 동안구 관양동 1708", "chargers_info": [ { "type": "완속(7kW 단독)", "status": "충전가능\n", "dateFinish": "2025.09.19 08:34", "dateFinishInfo": "6시간 5분 전 종료" }, { "type": "완속(7kW 단독)", "status": "충전가능\n", "dateFinish": "2025.09.19 10:47", "dateFinishInfo": "3시간 52분 전 종료" } ], "msg": "SUCCESS", "printString": "1. 충전가능\n(6시간 5분 전 종료) / 완속(7kW 단독)\n\n2. 충전가능\n(3시간 52분 전 종료) / 완속(7kW 단독)", "total_time": "9.42 seconds" }
+
+
+-- 스크래핑 해온 html 데이터 중 변수값에 넣을 가이드
+# 제목 title(String)
+id="form" 아래 h4 태그의 아래의 span 태그를 제외한 text값
+
+# 충전기 업체명 company_name(String)
+org_me 클래스의 text값
+
+# 충전기 정보 값 chargers_info(jsonArray)
+type : class="table01" 아래의 tbody태그의 첫번째 td 태그의 text값
+status : class="table01" 아래의 tbody태그의 해당하는 tr에서 세번째 td 태그의 class="state" 의 text값
+dateFinish : class="table01" 아래의 tbody태그의 해당하는 tr에서 세번째 td 태그의 class"rdate" 의 text값
+dateFinishInfo : dateFinish값에서 현재시간 기준(서울) 차이 값 예시)00시 00분 / status 값이 "충전중"이 아니라면 한칸띄고 "전 종료" 값 들어가야함
+
+# 충전기 총 갯수 total_chargers(int)
+chargers 값의 갯수
+
+# 충전기 사용된 갯수 used_chargers(int)
+chargers 값의 json 데이터 중에 status값이 "사용가능"이 아닌 것
+
+# 충전기 남은 갯수 remaining_chargers(int)
+충전기 총 갯수 값에서 - 충전기 사용된 갯수
+
+# 충전기 주소 address(String)
+class="table03" 아래 tbody 태그 아래 첫번째 tr 태그의 td 태그의 text 값
+
+# printString
+chargers_info 의 갯수별로 번호를 적어서 함
+1. {chargers_info의 status값}\n({dateFinishInfo}) / {chargers_info의 type값}
+2. {chargers_info의 status값}\n({dateFinishInfo}) / {chargers_info의 type값}
+
+예시)1. 충전가능\n(6시간 5분 전 종료) / 완속(7kW 단독)\n\n2. 충전중\n(3시간 52분) / 완속(7kW 단독)
+
+# total_time
+서비스 호출 후 반환때까지 걸린 시간
+
+
+서버 버전정보는 아래와 같아 호환성이 잘 맞도록 해주고
+centOS 6.10 
+아파치 2.2.15
+php 5.3.3
+Python 3.7.12
+Docker 19.03.9
+Mysql 5.1.73
+
+
+###### GPT 문의 #####
+
+
+
+서버 버전정보는 아래와 같아 각 버전에 맞게 알려줘
+centOS 6.10 
+아파치 2.2.15
+php 5.3.3
+Python 3.7.12
+Docker 19.03.9
+Mysql 5.1.73
+
+기존에 도커파일과 script.py파일과 get_ev_info.php파일이 있는데 너가 수정좀 해줘
+도커를 실행하면 브라우저가 먼저 떠있고 서비스 호출이 오면 탭을 띄워 해당 url로 통신하고(CSR 렌더링)
+특정한 시간동안 가져와야할 값이 존재하는지 체크하여 값이 있다면 그때 데이터를 스크래핑하여 내가 원하는 값으로 데이터를 반환해주고 해당 탭은 닫아주는 로직이야.
+근데 데이터 스크래핑을 잘 못해오고 어디선가 막히는건지 타임아웃이 나버리면서 잘 안돼 도와줘
+url 서비스 호출시 log 태그가 1이면 프로세스 절차의 모든 상황이 도커 로그에 나와야해
+
+파일소스와 여러가지 정보 알려줄께
+
+서비스 url을 호출하면 다음과 같은 예시 반환값이 와야해
+{ "title": "동편마을노외주차장", "company_name": "플러그링크", "total_chargers": 2, "used_chargers": 0, "remaining_chargers": 2, "address": "경기도 안양시 동안구 관양동 1708", "chargers_info": [ { "type": "완속(7kW 단독)", "status": "충전가능\n", "dateFinish": "2025.09.19 08:34", "dateFinishInfo": "6시간 5분 전 종료" }, { "type": "완속(7kW 단독)", "status": "충전가능\n", "dateFinish": "2025.09.19 10:47", "dateFinishInfo": "3시간 52분 전 종료" } ], "msg": "SUCCESS", "printString": "1. 충전가능\n(6시간 5분 전 종료) / 완속(7kW 단독)\n\n2. 충전가능\n(3시간 52분 전 종료) / 완속(7kW 단독)", "total_time": "9.42 seconds" }
+
+서비스 url 호출 예시 (sid값은 바뀔 수 있음)
+http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II
+
+도커 로그가 같이 찍히는 서비스 url 호출 예시
+http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II&log=1
+
+
+
+도커 실행 후 로그 보는 예시인데 모든 상황이 다 여기에 찍혀야해 script.py는 무조건 디버그모드로 작동되게
+docker logs -f --timestamps pyppeteer-service
+
+
+
+####### Dockerfile #######
+FROM python:3.7
+
+# Install system dependencies for Chromium and Pyppeteer
+RUN apt-get update && apt-get install -y \
+    chromium \
+    chromium-driver \
+    libnss3 \
+    libgconf-2-4 \
+    libxss1 \
+    libasound2 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc1 \
+    libgdk-pixbuf2.0-0 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxtst6 \
+    xdg-utils \
+    fonts-liberation \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for Pyppeteer
+ENV CHROME_BIN=/usr/bin/chromium \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    pyppeteer \
+    pytz \
+    lxml \
+    websockets
+
+# Create app directory
+WORKDIR /app
+
+# Copy the script
+COPY script.py /app/script.py
+
+# Expose the internal HTTP server port
+EXPOSE 8080
+
+# Run the script
+CMD ["python", "/app/script.py"]
+
+
+
+####### script.py #######
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+script.py — EV 상태 스크래핑
+- 퍼시스턴트 Chromium 데몬(DevTools) 사용
+- newPage 안정화(재사용/레이스/재연결/재기동) + '시간 바닥(floor)' 적용
+- XHR 캡처 → JSON 파싱 → 필드 매핑
+- 다이렉트 모드(수동 템플릿/자동 학습) 지원
+- 모든 진행 로그는 컨테이너 로그(docker logs)로 출력
+"""
+
+import os, sys, asyncio, time, re, json, random, shutil, signal
+from datetime import datetime
+from typing import Tuple, Optional, Any, List, Dict
+import urllib.parse, urllib.request
+
+import pytz
+from lxml import html  # (DOM 파서 보조용)
+from pyppeteer import connect
+
+# =========================
+# 환경설정(ENV로 조정 가능)
+# =========================
+CHROME_BIN = os.getenv("CHROME_BIN", "/usr/bin/chromium")
+KEEP_DAEMON = int(os.getenv("KEEP_DAEMON", "1"))  # 1이면 데몬 유지
+
+OVERALL_TIMEOUT_S = int(os.getenv("OVERALL_TIMEOUT_SEC", "45"))
+LAUNCH_TIMEOUT_S  = float(os.getenv("LAUNCH_TIMEOUT_SEC", "35.0"))   # 데몬 런치 타임아웃 (상한)
+NEWPAGE_TIMEOUT_S = float(os.getenv("NEWPAGE_TIMEOUT_SEC", "20.0"))  # 페이지 생성 타임아웃 (상한)
+NAV_TIMEOUT1_MS   = int(os.getenv("NAV_DEFAULT_TIMEOUT_MS", "18000"))
+NAV_TIMEOUT2_MS   = int(os.getenv("NAV_RETRY_TIMEOUT_MS",   "18000"))
+POLL_WINDOW_SEC   = float(os.getenv("POLL_WINDOW_SEC", "7.0"))
+POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL_SEC", "0.25"))
+HEADLESS = (os.getenv("HEADLESS", "1") != "0")
+
+# ★ 최소 보장 시간(floor): 남은 예산이 부족해도 이만큼은 반드시 시도
+MIN_LAUNCH_FLOOR_S  = float(os.getenv("MIN_LAUNCH_FLOOR_SEC", "12.0"))
+MIN_NEWPAGE_FLOOR_S = float(os.getenv("MIN_NEWPAGE_FLOOR_SEC","10.0"))
+
+# 다이렉트(브라우저 없이 HTTP로 직접)
+DIRECT_URL_TMPL     = os.getenv("EV_DIRECT_URL_TMPL", "").strip()
+DIRECT_METHOD       = os.getenv("EV_DIRECT_METHOD", "GET").upper()
+DIRECT_HEADERS_JSON = os.getenv("EV_DIRECT_HEADERS", "").strip()
+DIRECT_BODY_TMPL    = os.getenv("EV_DIRECT_BODY_TMPL", "").strip()
+DIRECT_TIMEOUT_S    = float(os.getenv("EV_DIRECT_TIMEOUT_SEC", "8"))
+
+# 자동 다이렉트(브라우저에서 관찰한 XHR 템플릿 저장/재사용)
+AUTO_DIRECT  = int(os.getenv("AUTO_DIRECT", "1"))
+AUTO_FILE    = "/tmp/ev-direct-hints.json"
+
+# 로깅 레벨
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+_level = {"DEBUG":10,"INFO":20,"WARN":30,"ERROR":40}
+
+# 데몬 경로/포트 파일
+DAEMON_ROOT = "/tmp/chrome-daemons"
+ACTIVE_DIR  = os.path.join(DAEMON_ROOT, "active")
+ACTIVE_EP   = os.path.join(DAEMON_ROOT, "ws_endpoint.txt")
+os.makedirs(DAEMON_ROOT, exist_ok=True)
+
+# 스텔스 & 계측 스크립트
+INJECT_JS = r"""
+Object.defineProperty(navigator,'webdriver',{get:()=>false});
+if(!navigator.plugins||navigator.plugins.length===0){Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3]});}
+window.__cap={logs:[],jsons:[],count:0};
+function _pushLog(o){try{window.__cap.logs.push(o);window.__cap.count++;}catch(e){}}
+function _pushJson(u,d){try{window.__cap.jsons.push({url:u,data:d});}catch(e){}}
+(function(){if(window._fetchPatched)return;window._fetchPatched=true;const _f=window.fetch;
+window.fetch=async function(i,n){const u=(typeof i==='string')?i:((i&&i.url)||'');const m=(n&&n.method)||'GET';const b=(n&&n.body)?String(n.body):'';
+_pushLog({type:'fetch-req',url:u,method:m,body:b.slice(0,500)});const r=await _f.apply(this,arguments);const ct=(r.headers.get('content-type')||'').toLowerCase();
+let t='';try{t=await r.clone().text();}catch(e){} _pushLog({type:'fetch-res',url=u,status=r.status,ct,snippet:t.slice(0,800)});
+if(ct.indexOf('application/json')>=0){try{_pushJson(u,JSON.parse(t));}catch(e){}} return r;};})();
+(function(){if(window._xhrPatched)return;window._xhrPatched=true;const o=XMLHttpRequest.prototype.open;const s=XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.open=function(m,u){this.__method=m;this.__url=u;return o.apply(this,arguments);};
+XMLHttpRequest.prototype.send=function(d){try{_pushLog({type:'xhr-req',url:this.__url,method:this.__method||'GET',body:(d?String(d).slice(0,500):'')});}catch(e){}
+this.addEventListener('readystatechange',function(){if(this.readyState===4){const ct=(this.getResponseHeader('content-type')||'').toLowerCase(); const t=(this.responseText||'').toString();
+_pushLog({type:'xhr-res',url:this.__url,status:this.status,ct,snippet:t.slice(0,800)}); if(ct.indexOf('application/json')>=0){try{_pushJson(this.__url,JSON.parse(t));}catch(e){}}}}); return s.apply(this,arguments);};
+})();
+"""
+MOBILE_UA = "Mozilla/5.0 (Linux; Android 11; SM-G998N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36"
+
+# =========================
+# 로깅
+# =========================
+_fd1 = None
+def _open_fd1_once():
+    global _fd1
+    if _fd1: return
+    for p in ("/proc/1/fd/1","/dev/fd/1"):
+        try:
+            _fd1 = open(p,"a",buffering=1)
+            break
+        except Exception:
+            _fd1 = None
+def _w(line: str):
+    try:
+        _open_fd1_once()
+        if _fd1:
+            _fd1.write(line + "\n")
+            _fd1.flush()
+    except Exception:
+        pass
+def _log(level, msg, *a):
+    if _level.get(level,20) < _level.get(LOG_LEVEL,20): return
+    try: s = msg % a if a else msg
+    except: s = msg + " " + " ".join(map(str,a))
+    _w(f"[TR {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {level} {s}")
+def log_debug(m,*a): _log("DEBUG",m,*a)
+def log_info(m,*a):  _log("INFO",m,*a)
+def log_warn(m,*a):  _log("WARN",m,*a)
+def log_err(m,*a):   _log("ERROR",m,*a)
+
+def _budget(deadline: float) -> float:
+    return max(0.0, deadline - time.time())
+
+async def _wait_for_floor(coro, seconds_cap: float, floor_seconds: float, deadline: float):
+    """
+    남은 예산이 floor보다 작아도 floor 만큼은 대기한다.
+    단, 외부에서 전체 타임아웃으로 끊길 수 있으므로 floor는 과도하게 크게 잡지 말 것.
+    """
+    t_cap = min(seconds_cap, seconds_cap)  # 의미상 cap 유지
+    t = max(floor_seconds, min(t_cap, _budget(deadline)))
+    return await asyncio.wait_for(coro, timeout=t)
+
+async def _wait_for(coro, seconds: float, deadline: float):
+    t = min(seconds, _budget(deadline))
+    if t <= 0.05:
+        raise asyncio.TimeoutError("budget_exhausted")
+    return await asyncio.wait_for(coro, timeout=t)
+
+# =========================
+# 파싱/가공 유틸
+# =========================
+def compute_date_finish_info(date_finish_str: str) -> str:
+    if not date_finish_str: return ""
+    try:
+        seoul = pytz.timezone("Asia/Seoul")
+        naive = datetime.strptime(date_finish_str.strip(), "%Y.%m.%d %H:%M")
+        finish_dt = seoul.localize(naive)
+        now_k = datetime.now(seoul)
+        diff = now_k - finish_dt
+        if diff.total_seconds() < 0: return ""
+        if diff.total_seconds() < 60: return "방금 전 종료"
+        total_min = int(diff.total_seconds() // 60)
+        h, m = divmod(total_min, 60)
+        if h >= 24:
+            d = h // 24; rh = h % 24
+            return f"{d}일 {rh}시간 전 종료" if rh else f"{d}일 전 종료"
+        return f"{h}시간 {m}분 전 종료" if h else f"{m}분 전 종료"
+    except Exception:
+        return ""
+
+def parse_status(status_text: str) -> str:
+    text = (status_text or "").strip()
+    m = re.search(r"(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?\s*(?:충전중|사용중)", text) or \
+        re.search(r"(?:충전중|사용중)\s*(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?", text)
+    if m:
+        hh, mm = m.group(1), m.group(2)
+        base = "충전중" if "충전중" in text else ("사용중" if "사용중" in text else text)
+        h = int(hh) if hh else 0
+        mv = int(mm) if mm else 0
+        if not hh and mv >= 60:
+            h2, r2 = divmod(mv, 60)
+            h += h2; mv = r2
+        if h and mv: return f"{base}\n({h}시간 {mv}분)"
+        if h:        return f"{base}\n({h}시간)"
+        if mv:       return f"{base}\n({mv}분)"
+        return base + "\n"
+    return text + "\n"
+
+def build_print_string(chargers_info: List[dict]) -> str:
+    if not chargers_info: return ""
+    out=[]
+    for i,c in enumerate(chargers_info):
+        st = c.get("status","").rstrip("\n")
+        tp = c.get("type","")
+        d  = c.get("dateFinishInfo","")
+        out.append(f"{i+1}. {st}\n({d}) / {tp}" if d else f"{i+1}. {st} / {tp}")
+    return "\n\n".join(out)
+
+def map_to_output(items: List[dict]) -> Optional[dict]:
+    if not items: return None
+    cis=[]
+    for it in items:
+        if not isinstance(it, dict): continue
+        tp = it.get("type") or it.get("connectorType") or it.get("cpTp") or it.get("chgerType") or it.get("ctype") or ""
+        st = it.get("status") or it.get("statNm") or it.get("state") or it.get("stat") or it.get("cstat") or ""
+        end= it.get("dateFinish") or it.get("endTime") or it.get("rdate") or it.get("lastEndTime") or it.get("statUpdDt") or ""
+        st_txt = str(st)
+        if ("충전중" in st_txt) or ("사용중" in st_txt):
+            status = parse_status(st_txt); dfi = ""
+        else:
+            status = parse_status(st_txt); dfi = compute_date_finish_info(end) if end else ""
+        cis.append({"type": str(tp), "status": status, "dateFinish": str(end), "dateFinishInfo": dfi})
+    tot=len(cis); used=sum(1 for c in cis if ("사용중" in c["status"]) or ("충전중" in c["status"]) or ("충전불가" in c["status"]))
+    return {
+        "title":"", "company_name":"", "total_chargers":tot, "used_chargers":used,
+        "remaining_chargers":tot-used, "address":"", "chargers_info":cis,
+        "msg":"SUCCESS", "printString": build_print_string(cis)
+    }
+
+def _json_loose_parse(txt: str) -> Optional[Any]:
+    txt = (txt or "").strip()
+    if not txt: return None
+    # JSONP
+    if "(" in txt and txt.endswith(")"):
+        m = re.search(r"\(\s*({[\s\S]+})\s*\)\s*;?\s*$", txt)
+        if m: txt = m.group(1)
+    # var a = {...}
+    m = re.search(r"=\s*({[\s\S]+})\s*;?$", txt)
+    if m: txt = m.group(1)
+    try:
+        return json.loads(txt)
+    except Exception:
+        m = re.search(r"({[\s\S]+})", txt)
+        if m:
+            try: return json.loads(m.group(1))
+            except Exception: return None
+        return None
+
+def _extract_items_from_any(data: Any) -> Optional[List[dict]]:
+    paths=[]
+    def walk(node, path=""):
+        if isinstance(node, list) and node and isinstance(node[0], dict):
+            paths.append((path, node))
+        elif isinstance(node, dict):
+            for k,v in node.items():
+                walk(v, f"{path}.{k}" if path else k)
+    walk(data)
+    for key in ("chargers","items","rows","list","data","result"):
+        for p, arr in paths:
+            if p.endswith(key): return arr
+    return paths[0][1] if paths else None
+
+# =========================
+# 다이렉트(HTTP) 모드
+# =========================
+def _direct_http(url: str, method: str="GET", headers: Optional[Dict[str,str]]=None, body: Optional[str]=None, timeout: float=8.0) -> Tuple[int, str, Dict[str,str]]:
+    req = urllib.request.Request(url=url, method=method)
+    if headers:
+        for k,v in headers.items():
+            if k.lower() in ("host","content-length"): continue
+            req.add_header(k, v)
+    data = body.encode("utf-8") if (body is not None) else None
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=timeout) as resp:
+            code = resp.getcode()
+            ctype = resp.headers.get("Content-Type","")
+            txt = resp.read().decode("utf-8","ignore")
+            return code, txt, {"content-type":ctype}
+    except Exception as e:
+        return 0, str(e), {}
+
+def _try_direct_manual(sid: str) -> Optional[dict]:
+    if not DIRECT_URL_TMPL:
+        return None
+    try:
+        headers = json.loads(DIRECT_HEADERS_JSON) if DIRECT_HEADERS_JSON else {}
+    except Exception:
+        headers = {}
+    url  = DIRECT_URL_TMPL.replace("{sid}", urllib.parse.quote_plus(sid))
+    body = DIRECT_BODY_TMPL.replace("{sid}", sid) if DIRECT_BODY_TMPL else None
+    code, text, resp_headers = _direct_http(url, DIRECT_METHOD or "GET", headers, body, DIRECT_TIMEOUT_S)
+    if code and 200 <= code < 300 and text:
+        data = _json_loose_parse(text) or {}
+        items = _extract_items_from_any(data) or []
+        mapped = map_to_output(items)
+        if mapped:
+            return mapped
+    return None
+
+def _load_hints() -> dict:
+    try:
+        if os.path.exists(AUTO_FILE):
+            with open(AUTO_FILE,"r") as f: return json.load(f)
+    except Exception: pass
+    return {}
+def _save_hints(h: dict):
+    try:
+        tmp = AUTO_FILE + ".tmp"
+        with open(tmp,"w") as f: json.dump(h, f, ensure_ascii=False, indent=2)
+        os.rename(tmp, AUTO_FILE)
+    except Exception: pass
+def _sidize_template(value: str, sid: str) -> Optional[str]:
+    if not value or not sid: return None
+    if sid in value:
+        return value.replace(sid, "{sid}")
+    return None
+
+def _try_direct_auto(sid: str, host: str) -> Optional[dict]:
+    if not AUTO_DIRECT: return None
+    hints = _load_hints()
+    tpl = hints.get(host)
+    if not tpl: return None
+    url_tmpl  = tpl.get("url_tmpl","")
+    method    = (tpl.get("method","GET") or "GET").upper()
+    headers   = tpl.get("headers",{})
+    body_tmpl = tpl.get("body_tmpl","")
+    if not url_tmpl: return None
+    url  = url_tmpl.replace("{sid}", urllib.parse.quote_plus(sid))
+    body = body_tmpl.replace("{sid}", sid) if body_tmpl else None
+    code, text, resp_headers = _direct_http(url, method, headers, body, DIRECT_TIMEOUT_S)
+    if code and 200 <= code < 300 and text:
+        data = _json_loose_parse(text) or {}
+        items = _extract_items_from_any(data) or []
+        mapped = map_to_output(items)
+        if mapped:
+            return mapped
+    return None
+
+def _maybe_learn_hint_from_logs(sid: str, xhr_logs: List[dict], host: str):
+    if not AUTO_DIRECT or not xhr_logs: return
+    cand = None
+    for l in reversed(xhr_logs):
+        u = l.get("url","") or ""
+        b = l.get("body","") or ""
+        if sid and (sid in u or sid in b):
+            cand = l; break
+    if not cand: return
+    url_tmpl = _sidize_template(cand.get("url",""), sid)
+    body_tmpl= _sidize_template((cand.get("body","") or ""), sid)
+    if not url_tmpl and not body_tmpl: return
+    headers = {}
+    ct = cand.get("ct","")
+    if "x-www-form-urlencoded" in (ct or ""):
+        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+    hints = _load_hints()
+    hints[host] = {
+        "url_tmpl": url_tmpl or "",
+        "method":   (cand.get("method","GET") or "GET").upper(),
+        "headers":  headers,
+        "body_tmpl":body_tmpl or ""
+    }
+    _save_hints(hints)
+    log_info("learned auto-direct template for %s", host)
+
+# =========================
+# 크로미움 데몬
+# =========================
+class ChromeDaemon:
+    def __init__(self):
+        self.proc = None
+        self.profile_dir = None
+        self.ws_endpoint = None
+
+    def _cached_ws(self) -> Optional[str]:
+        try:
+            if os.path.exists(ACTIVE_EP):
+                ep = open(ACTIVE_EP,"r").read().strip()
+                if ep.startswith("ws://"): return ep
+        except Exception: pass
+        ap = os.path.join(ACTIVE_DIR,"DevToolsActivePort")
+        try:
+            if os.path.exists(ap):
+                with open(ap,"r") as f:
+                    lines=[x.strip() for x in f if x.strip()]
+                if lines:
+                    port = lines[0]; suf = lines[1] if len(lines)>1 else "/devtools/browser"
+                    return f"ws://127.0.0.1:{port}{suf if suf.startswith('/devtools') else '/devtools/browser'}"
+        except Exception: pass
+        return None
+
+    async def connect_existing(self, deadline: float):
+        ws = self._cached_ws()
+        if not ws: return None
+        log_info("try attach existing daemon %s", ws)
+        try:
+            br = await _wait_for_floor(connect(browserWSEndpoint=ws), 6.0, 4.0, deadline)
+            self.ws_endpoint = ws; self.profile_dir = ACTIVE_DIR
+            log_info("attached existing daemon")
+            return br
+        except Exception as e:
+            log_warn("attach failed %s", repr(e))
+            return None
+
+    async def _hard_kill_all(self):
+        try:
+            if shutil.which("pkill"):
+                p=await asyncio.create_subprocess_exec("pkill","-9","-f","chromium", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await p.wait()
+            elif shutil.which("killall"):
+                p=await asyncio.create_subprocess_exec("killall","-9","chromium", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await p.wait()
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+
+    async def start(self, deadline: float) -> bool:
+        os.makedirs(ACTIVE_DIR, exist_ok=True)
+        cache_dir="/tmp/chrome-cache"; os.makedirs(cache_dir, exist_ok=True)
+        self.profile_dir = ACTIVE_DIR
+
+        args = [
+            CHROME_BIN,
+            "--headless=new",
+            "--no-sandbox","--disable-setuid-sandbox",
+            "--remote-debugging-port=0",
+            f"--user-data-dir={self.profile_dir}",
+            "--enable-logging=stderr","--v=1",
+            "--disable-gpu","--disable-extensions","--no-zygote","--no-first-run",
+            "--disable-background-networking","--disable-default-apps","--disable-sync",
+            "--metrics-recording-only","--mute-audio",
+            "--blink-settings=imagesEnabled=false",
+            "--proxy-server=direct://","--proxy-bypass-list=*",
+            "--disable-features=IsolateOrigins,site-per-process",
+            f"--disk-cache-dir={cache_dir}",
+            "--disable-software-rasterizer",
+            "--disable-dev-shm-usage",
+        ]
+
+        async def _spawn():
+            self.proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE
+            )
+            ws_re = re.compile(r"DevTools listening on (ws://[^\s]+)")
+            active_port = os.path.join(self.profile_dir,"DevToolsActivePort")
+            # ★ 런치 대기는 '최소 보장 시간' 사용
+            end = time.time() + max(MIN_LAUNCH_FLOOR_S, min(LAUNCH_TIMEOUT_S, _budget(deadline)))
+            while time.time() < end:
+                try:
+                    chunk = await asyncio.wait_for(self.proc.stderr.readline(), timeout=0.3)
+                    if chunk:
+                        line = chunk.decode("utf-8","ignore").rstrip("\n")
+                        _w(line)
+                        m = ws_re.search(line)
+                        if m:
+                            self.ws_endpoint = m.group(1)
+                            open(ACTIVE_EP,"w").write(self.ws_endpoint)
+                            log_info("daemon ws endpoint %s", self.ws_endpoint)
+                            return True
+                except asyncio.TimeoutError:
+                    pass
+                if os.path.exists(active_port):
+                    try:
+                        with open(active_port,"r") as f:
+                            lines=[x.strip() for x in f if x.strip()]
+                        if lines:
+                            port=lines[0]; suf=lines[1] if len(lines)>1 else "/devtools/browser"
+                            self.ws_endpoint = f"ws://127.0.0.1:{port}{suf if suf.startswith('/devtools') else '/devtools/browser'}"
+                            open(ACTIVE_EP,"w").write(self.ws_endpoint)
+                            log_info("daemon ws endpoint %s", self.ws_endpoint)
+                            return True
+                    except Exception as e:
+                        log_warn("ActivePort parse fail %s", repr(e))
+            return False
+
+        log_info("starting daemon chromium (persistent)")
+        ok = await _spawn()
+        if ok: return True
+
+        # 1차 실패 → 하드킬 후 재시도
+        log_warn("daemon launch timeout -> hard kill & retry")
+        await self._hard_kill_all()
+        ok = await _spawn()
+        if ok: return True
+
+        # 2차 실패 → 강제 종료(KEEP_DAEMON 무시)
+        log_warn("daemon launch failed twice -> force stop")
+        await self.stop(force=True)
+        return False
+
+    async def stop(self, force: bool=False):
+        if KEEP_DAEMON and not force:
+            log_info("KEEP_DAEMON=1 -> keep chromium running")
+            return
+        try:
+            if self.proc and self.proc.returncode is None:
+                self.proc.send_signal(signal.SIGKILL)
+                try:
+                    await asyncio.wait_for(self.proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass
+        except Exception:
+            pass
+        # ActivePort/endpoint 파일 정리(낡은 포트로 연결 방지)
+        try:
+            for p in (ACTIVE_EP, os.path.join(ACTIVE_DIR,"DevToolsActivePort")):
+                if os.path.exists(p): os.remove(p)
+        except Exception:
+            pass
+
+# =========================
+# 페이지 확보(안정화)
+# =========================
+async def _get_page_with_restart(daemon: ChromeDaemon, browser, deadline: float):
+    """
+    1) 기존 탭 재사용 → 2) 기본/시크릿 동시 시도 → 3) 브라우저 재연결 →
+    4) 데몬 강제 재기동 후 최종 시도. 모두 실패하면 TimeoutError.
+    모든 newPage/연결에는 '최소 보장 시간' 적용.
+    """
+    async def _ping(page):
+        try:
+            await _wait_for_floor(page.evaluate("()=>'ok'"), 2.0, 1.0, deadline)
+            return True
+        except Exception:
+            return False
+
+    # 1) 기존 탭 재사용
+    try:
+        pages = await _wait_for_floor(browser.pages(), 5.0, 2.0, deadline)
+        for p in pages:
+            if await _ping(p):
+                log_info("reuse existing page")
+                return (None, p)
+    except Exception:
+        pass
+
+    # 2) 기본/시크릿 동시 시도
+    async def _default():
+        p = await _wait_for_floor(browser.newPage(), NEWPAGE_TIMEOUT_S, MIN_NEWPAGE_FLOOR_S, deadline)
+        if not await _ping(p): raise asyncio.TimeoutError("page_ping_fail")
+        return (None, p)
+    async def _incog():
+        ctx = await _wait_for_floor(browser.createIncognitoBrowserContext(), NEWPAGE_TIMEOUT_S, MIN_NEWPAGE_FLOOR_S, deadline)
+        p   = await _wait_for_floor(ctx.newPage(), NEWPAGE_TIMEOUT_S, MIN_NEWPAGE_FLOOR_S, deadline)
+        if not await _ping(p): raise asyncio.TimeoutError("page_ping_fail")
+        return (ctx, p)
+
+    try:
+        done, pending = await asyncio.wait(
+            {asyncio.create_task(_default()), asyncio.create_task(_incog())},
+            timeout=max(MIN_NEWPAGE_FLOOR_S, min(NEWPAGE_TIMEOUT_S, _budget(deadline))),
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        for t in pending: t.cancel()
+        if done:
+            return list(done)[0].result()
+    except Exception as e:
+        log_warn("newPage race failed (%s), will reconnect", repr(e))
+
+    # 3) 브라우저 재연결
+    try:
+        ws = daemon._cached_ws()
+        if ws:
+            log_info("reconnect to daemon %s", ws)
+            browser = await _wait_for_floor(connect(browserWSEndpoint=ws), 8.0, 4.0, deadline)
+            p = await _wait_for_floor(browser.newPage(), NEWPAGE_TIMEOUT_S, MIN_NEWPAGE_FLOOR_S, deadline)
+            if await _ping(p):
+                return (None, p)
+    except Exception as e:
+        log_warn("reconnect/newPage failed %s", repr(e))
+
+    # 4) 데몬 강제 재기동 (KEEP_DAEMON와 무관)
+    log_warn("restart chromium daemon to recover")
+    await daemon.stop(force=True)
+    if not await daemon.start(deadline):
+        raise asyncio.TimeoutError("daemon_restart_fail")
+    try:
+        browser = await _wait_for_floor(connect(browserWSEndpoint=daemon.ws_endpoint), 10.0, 6.0, deadline)
+        p = await _wait_for_floor(browser.newPage(), NEWPAGE_TIMEOUT_S, MIN_NEWPAGE_FLOOR_S, deadline)
+        if await _ping(p):
+            return (None, p)
+    except Exception as e:
+        log_warn("post-restart newPage failed %s", repr(e))
+    raise asyncio.TimeoutError("newPage_unavailable")
+
+# =========================
+# 브라우징 + 계측 → 파싱
+# =========================
+async def _browser_capture_and_parse(sid: str, deadline: float) -> dict:
+    host = "www.ev.or.kr"
+
+    daemon = ChromeDaemon()
+    browser = await daemon.connect_existing(deadline)
+    if not browser:
+        ok = await daemon.start(deadline)
+        if not ok:
+            await daemon.stop(force=True)
+            return {"msg":"RETRY","reason":"chrome_warming_up"}
+        try:
+            browser = await _wait_for_floor(connect(browserWSEndpoint=daemon.ws_endpoint), 8.0, 5.0, deadline)
+        except Exception:
+            await daemon.stop(force=True)
+            return {"msg":"RETRY","reason":"chrome_connect_fail"}
+
+    page=None; ctx=None
+    xhr_json_blobs: List[Tuple[str, Any]] = []
+    xhr_logs: List[Dict[str, Any]] = []
+
+    try:
+        log_info("acquire page")
+        ctx, page = await _get_page_with_restart(daemon, browser, deadline)
+
+        # inject & 환경 세팅
+        await page.evaluateOnNewDocument(INJECT_JS)
+        await page.setUserAgent(MOBILE_UA)
+        await page.setViewport({"width": 390, "height": 844, "isMobile": True})
+        await page.setExtraHTTPHeaders({
+            "Accept-Language":"ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control":"no-cache",
+            "Referer":"https://www.ev.or.kr/"
+        })
+        await page.setRequestInterception(True)
+        # 리소스 절감
+        async def on_req(req):
+            try:
+                rt = getattr(req, "resourceType", None)
+                if rt in ("image","font","media"):
+                    await req.abort()
+                else:
+                    await req.continue_()
+            except Exception:
+                try: await req.continue_()
+                except Exception: pass
+        page.on("request", lambda r: asyncio.create_task(on_req(r)))
+
+        async def on_resp(resp):
+            try:
+                ct=(resp.headers.get("content-type","") or "").lower()
+                rt=getattr(getattr(resp,"request",None),"resourceType",None)
+                if rt in ("xhr","fetch"):
+                    txt=""
+                    try: txt=await resp.text()
+                    except: pass
+                    if "application/json" in ct:
+                        try:
+                            xhr_json_blobs.append((resp.url, json.loads(txt)))
+                        except: pass
+                    else:
+                        data=_json_loose_parse(txt)
+                        if isinstance(data,(dict,list)):
+                            xhr_json_blobs.append((resp.url, data))
+                    xhr_logs.append({"url": resp.url, "status": resp.status, "ct": ct, "snippet": (txt or "")[:600]})
+            except Exception:
+                pass
+        page.on("response", lambda r: asyncio.create_task(on_resp(r)))
+
+        base_url = "https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=%s&pFlag=Y" % urllib.parse.quote_plus(sid)
+
+        # 1차 네비게이션
+        nav1 = int(min(NAV_TIMEOUT1_MS, max(1500, _budget(deadline)*1000*0.6)))
+        log_info("goto1 %s (timeout=%dms)", base_url, nav1)
+        try:
+            await _wait_for(page.goto(base_url, {"waitUntil":"domcontentloaded","timeout":nav1}), nav1/1000.0, deadline)
+        except Exception as e:
+            log_warn("goto1 failed %s", type(e).__name__)
+
+        try:
+            await _wait_for(page.waitForFunction("() => (window.__cap && window.__cap.count>=1)", {"polling":250}), 5.0, deadline)
+        except Exception:
+            pass
+
+        # poll1
+        end1 = time.time() + min(POLL_WINDOW_SEC, max(0.8, _budget(deadline)-2.5))
+        while time.time() < end1 and _budget(deadline) > 0.5:
+            try:
+                cap = await _wait_for(page.evaluate(
+                    "() => ({cnt:(window.__cap&&window.__cap.count)||0, logs:(window.__cap&&window.__cap.logs)||[], jsons:(window.__cap&&window.__cap.jsons)||[]})"
+                ), 1.0, deadline)
+                for j in cap.get("jsons", [])[:10]:
+                    xhr_json_blobs.append((j.get("url",""), j.get("data")))
+                for l in cap.get("logs", [])[:20]:
+                    if isinstance(l, dict):
+                        xhr_logs.append({k:l.get(k) for k in ("type","url","status","ct","snippet","method","body")})
+            except Exception:
+                pass
+
+            for _url, data in list(xhr_json_blobs):
+                items = _extract_items_from_any(data)
+                if items:
+                    mapped = map_to_output(items)
+                    if mapped:
+                        _maybe_learn_hint_from_logs(sid, xhr_logs, host)
+                        mapped.setdefault("debug", {})["xhr_samples"] = xhr_logs[:12]
+                        return mapped
+            await asyncio.sleep(POLL_INTERVAL_SEC)
+
+        # 2차 네비게이션
+        nav2 = int(min(NAV_TIMEOUT2_MS, max(1500, _budget(deadline)*1000*0.6)))
+        log_info("goto2 %s (timeout=%dms)", base_url, nav2)
+        try:
+            await _wait_for(page.goto(base_url, {"waitUntil":"networkidle2","timeout":nav2}), nav2/1000.0, deadline)
+        except Exception as e:
+            log_warn("goto2 failed %s", type(e).__name__)
+
+        # poll2
+        end2 = time.time() + min(POLL_WINDOW_SEC, max(0.8, _budget(deadline)-1.0))
+        while time.time() < end2 and _budget(deadline) > 0.4:
+            try:
+                cap = await _wait_for(page.evaluate(
+                    "() => ({cnt:(window.__cap&&window.__cap.count)||0, logs:(window.__cap&&window.__cap.logs)||[], jsons:(window.__cap&&window.__cap.jsons)||[]})"
+                ), 1.0, deadline)
+                for j in cap.get("jsons", [])[:10]:
+                    xhr_json_blobs.append((j.get("url",""), j.get("data")))
+                for l in cap.get("logs", [])[:20]:
+                    if isinstance(l, dict):
+                        xhr_logs.append({k:l.get(k) for k in ("type","url","status","ct","snippet","method","body")})
+            except Exception:
+                pass
+
+            for _url, data in list(xhr_json_blobs):
+                items = _extract_items_from_any(data)
+                if items:
+                    mapped = map_to_output(items)
+                    if mapped:
+                        _maybe_learn_hint_from_logs(sid, xhr_logs, host)
+                        mapped.setdefault("debug", {})["xhr_samples"] = xhr_logs[:12]
+                        return mapped
+            await asyncio.sleep(POLL_INTERVAL_SEC)
+
+        return {
+            "msg":"NO_DATA","reason":"xhr_not_found",
+            "title":"", "company_name":"",
+            "total_chargers":0, "used_chargers":0, "remaining_chargers":0,
+            "address":"", "chargers_info":[], "printString":"",
+            "debug":{"xhr_samples": xhr_logs[:20]}
+        }
+
+    finally:
+        try:
+            if page: await page.close()
+        except Exception: pass
+        try:
+            if ctx: await ctx.close()
+        except Exception: pass
+        # 데몬은 KEEP_DAEMON=1이면 유지
+
+# =========================
+# 메인 플로우 (다이렉트→자동다이렉트→브라우저)
+# =========================
+async def fetch_once(sid: str, overall_timeout: int = OVERALL_TIMEOUT_S) -> dict:
+    started = time.time()
+    deadline = started + overall_timeout - 1.0
+    host = "www.ev.or.kr"
+
+    # 1) 수동 다이렉트
+    direct = _try_direct_manual(sid)
+    if direct:
+        direct["total_time"] = f"{time.time()-started:.2f} seconds"
+        return direct
+
+    # 2) 자동 다이렉트
+    auto = _try_direct_auto(sid, host)
+    if auto:
+        auto["total_time"] = f"{time.time()-started:.2f} seconds"
+        return auto
+
+    # 3) 브라우저 → 캡처/파싱
+    out = await _browser_capture_and_parse(sid, deadline)
+    out["total_time"] = f"{time.time()-started:.2f} seconds"
+    return out
+
+# =========================
+# CLI
+# =========================
+def parse_args(argv: List[str]):
+    sid=""; timeout=OVERALL_TIMEOUT_S; logflag=False
+    for a in argv:
+        if a.startswith("--sid="): sid=a.split("=",1)[1].strip()
+        elif a.startswith("--timeout="):
+            try: timeout=int(a.split("=",1)[1])
+            except: pass
+        elif a.startswith("--log="):
+            v=a.split("=",1)[1].strip().lower(); logflag = v in ("1","true","yes","y")
+    return sid, timeout, logflag
+
+if __name__ == "__main__":
+    sid, timeout, logflag = parse_args(sys.argv[1:])
+    if logflag: LOG_LEVEL="DEBUG"
+    if not sid:
+        print(json.dumps({"msg":"NO_SID","error":"sid required"}, ensure_ascii=False), end=""); sys.exit(2)
+
+    log_info("start sid=%s timeout=%s", sid, timeout)
+
+    try:
+        loop = asyncio.get_event_loop()
+    except Exception:
+        loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+
+    try:
+        payload = loop.run_until_complete(fetch_once(sid, overall_timeout=timeout))
+        # stdout에는 반드시 JSON만
+        print(json.dumps(payload, ensure_ascii=False), end="")
+        # 종료 코드
+        code = 0 if payload.get("msg")=="SUCCESS" else (4 if payload.get("msg")=="RETRY" else (3 if payload.get("msg")=="NO_DATA" else 1))
+        sys.exit(code)
+    except Exception as e:
+        log_err("fatal %s", repr(e))
+        print(json.dumps({"msg":"ERROR","error":str(e)}, ensure_ascii=False), end="")
+        sys.exit(1)
+
+
+###### get_ev_info.php #######
+<?php
+// get_info_ev.php (PHP 5.3 호환) — 파일 캐시 + 리트라이 + 외부 타임아웃(124) 처리 강화
+require_once __DIR__ . '/db_ev.php';
+require_once __DIR__ . '/check_access_ev.php';
+
+/* ---------- JSON 한글 깨짐 방지 ---------- */
+if (!function_exists('json_encode_utf8')) {
+    function json_encode_utf8($data) {
+        $json = json_encode($data);
+        if ($json === false) return 'null';
+        return preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', function($m){
+            $code = hexdec($m[1]);
+            if ($code < 0x80) return chr($code);
+            if ($code < 0x800) return chr(0xC0|($code>>6)).chr(0x80|($code&0x3F));
+            return chr(0xE0|($code>>12)).chr(0x80|(($code>>6)&0x3F)).chr(0x80|($code&0x3F));
+        }, $json);
+    }
+}
+
+/* ---------- 상태코드 전송 (PHP 5.3용) ---------- */
+function send_status($code) {
+    $texts = array(
+        200=>'OK', 400=>'Bad Request', 403=>'Forbidden', 404=>'Not Found',
+        500=>'Internal Server Error', 502=>'Bad Gateway', 504=>'Gateway Timeout'
+    );
+    $proto = isset($_SERVER['SERVER_PROTOCOL']) ? $_SERVER['SERVER_PROTOCOL'] : 'HTTP/1.1';
+    $text  = isset($texts[$code]) ? $texts[$code] : '';
+    header($proto . ' ' . $code . ' ' . $text);
+}
+function json_out($arr, $code=200) {
+    send_status($code);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode_utf8($arr);
+    exit;
+}
+
+/* ---------- 파라미터/체크 ---------- */
+$sid      = isset($_GET['sid']) ? trim($_GET['sid']) : '';
+$category = isset($_GET['category']) ? trim($_GET['category']) : '';
+$key      = isset($_GET['key']) ? strtoupper(trim($_GET['key'])) : '';
+// $debug    = ((isset($_GET['debug']) && $_GET['debug']==='1') || (isset($_SERVER['HTTP_X_DEBUG']) && $_SERVER['HTTP_X_DEBUG']==='1'));
+$debug = true; // ← 무조건 디버그
+
+if ($sid==='' || $category==='' || $key==='') {
+    json_out(array('error'=>'필수 파라미터 누락: sid, category, key','http_code'=>400),400);
+}
+$chk = check_access_inline_ev($category,$sid,$key,'text');
+if ($chk !== 'access') {
+    json_out(array('error'=>$chk,'http_code'=>403),403);
+}
+
+/* ---------- 캐시 설정 (파일 기반) ---------- */
+$CACHE_TTL  = 20;                 // 초 (원하면 15~30 조정)
+$CACHE_DIR  = '/tmp/ev-cache';
+if (!is_dir($CACHE_DIR)) { @mkdir($CACHE_DIR, 0777, true); }
+$cache_key  = preg_replace('/[^A-Za-z0-9_\-\.]/','_', $sid);
+$cache_file = $CACHE_DIR . '/ev_' . $cache_key . '.json';
+
+function cache_read($file, $ttl) {
+    if (is_readable($file)) {
+        $age = time() - filemtime($file);
+        if ($age >= 0 && $age <= $ttl) {
+            $txt = @file_get_contents($file);
+            if ($txt !== false && $txt !== '') {
+                $j = json_decode($txt, true);
+                if (is_array($j) && isset($j['msg'])) return $j;
+            }
+        }
+    }
+    return null;
+}
+function cache_write($file, $arr) {
+    @file_put_contents($file, json_encode_utf8($arr));
+}
+
+/* ---------- 캐시 히트 시 즉시 반환 ---------- */
+$cached = cache_read($cache_file, $CACHE_TTL);
+if ($cached && isset($cached['msg']) && $cached['msg']==='SUCCESS') {
+    $cached['_cache'] = 'HIT';
+    json_out($cached, 200);
+}
+
+/* ---------- docker exec 명령 구성 ---------- */
+$container = 'pyppeteer-service';
+$timeout_s = 55; // 바깥 타임아웃( /usr/bin/timeout ) — script.py는 45 내외로 완료되도록 구성
+$cmd_base = 'docker exec ' . escapeshellarg($container)
+         . ' env ' . ($debug ? 'LOG_LEVEL=DEBUG ' : '')
+         . ' python3 /app/script.py'
+         . ' --sid=' . escapeshellarg($sid)
+         . ' --timeout=' . (int)$timeout_s;
+if ($debug) $cmd_base .= ' --log=1';
+
+if (is_executable('/usr/bin/timeout')) {
+    $cmd_base = '/usr/bin/timeout ' . (int)($timeout_s + 5) . 's ' . $cmd_base;
+}
+
+/* ---------- 리트라이 정책 ---------- */
+/*
+  - 1차 호출: 성공 시 즉시 캐시/반환
+  - 실패(RETQ/NO_DATA/ERROR/바깥 타임아웃 124) 시 200ms 후 1회 재호출
+  - 둘 다 실패면 마지막 응답 반환 (HTTP 코드 매핑)
+*/
+$attempts = 2;
+$last = null;
+
+for ($i=1; $i<=$attempts; $i++) {
+    $cmd = $cmd_base;
+
+    $descriptors = array(
+        0 => array('pipe','r'),
+        1 => array('pipe','w'),
+        2 => array('pipe','w'),
+    );
+    $proc = proc_open($cmd, $descriptors, $pipes);
+    if (!is_resource($proc)) {
+        $last = array('msg'=>'ERROR','error'=>'실행 시작 실패','cmd'=>$cmd);
+        break;
+    }
+    fclose($pipes[0]);
+
+    // stdout/stderr 수집
+    $stdout = stream_get_contents($pipes[1]); fclose($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]); fclose($pipes[2]);
+    $status = proc_close($proc);
+    $body   = trim($stdout !== '' ? $stdout : $stderr);
+
+    // JSON 파싱 시도
+    $json = null;
+    if ($body !== '' && ($body[0] === '{' || $body[0] === '[')) {
+        $json = json_decode($body, true);
+    }
+
+    if (is_array($json) && isset($json['msg'])) {
+        if ($json['msg'] === 'SUCCESS') {
+            cache_write($cache_file, $json);
+            send_status(200);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode_utf8($json);
+            exit;
+        }
+        // 실패면 다음 시도 (마지막이면 탈출)
+        $last = $json;
+    } else {
+        // 비정상 본문 처리 강화(바깥 타임아웃 포함)
+        if ($status === 124) {
+            // /usr/bin/timeout 에 의해 docker exec 전체가 타임아웃된 케이스
+            $last = array(
+                'msg'    => 'RETRY',
+                'reason' => 'outer_timeout',
+                'error'  => 'command timed out',
+                'exit'   => 124
+            );
+        } else {
+            $last = array(
+                'msg'     => 'ERROR',
+                'error'   => '비정상 응답 본문',
+                'exit'    => $status,
+                'snippet' => mb_substr($body, 0, 500, 'UTF-8')
+            );
+        }
+    }
+
+    // 재시도 간 짧은 휴지
+    if ($i < $attempts) { usleep(200 * 1000); }
+}
+
+/* ---------- 최종 실패 응답 ---------- */
+$http = 500;
+if (is_array($last)) {
+    if (isset($last['msg']) && $last['msg']==='RETRY') {
+        $http = 502;
+    } elseif (isset($last['msg']) && $last['msg']==='NO_DATA') {
+        $http = 504;
+    } elseif (isset($last['http_code'])) {
+        $http = (int)$last['http_code'];
+    }
+    $last['_cache'] = 'MISS';
+    json_out($last, $http);
+}
+json_out(array('error'=>'비정상 응답','http_code'=>500,'_cache'=>'MISS'),500);
