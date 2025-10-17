@@ -23,9 +23,6 @@ ssh -oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedAlgorithms=+ssh-rsa root@hansbu
 mysql -u root -p
 
 
-//php 로그보기
-tail -f /var/log/php_errors.log
-
 
 
 //git 가이드
@@ -167,11 +164,16 @@ docker build --no-cache -t pyppeteer-service:latest .
 
 
 # 3) 컨테이너 실행
-docker run -d --name pyppeteer-service -p 8000:8000 --restart=always pyppeteer-service:latest
+docker run -d --name pyppeteer-service -p 5000:5000 --restart always pyppeteer-service:latest
+
+
+//누적된 크롬 kill
+pkill -f chrome-linux/chrome
 
 
 
-
+//빌드된 크롬 데이터 삭제 경로
+/root/.local/share/pyppeteer/local-chromium
 
 
 # 서버에서 직접 호출(디버깅 모드)
@@ -190,14 +192,23 @@ clear && printf '\e[3J'
 
 
 
+//git 업데이트 막기
+git update-index --assume-unchanged ChulsaGo/AppDelegate.swift
+
+git update-index --skip-worktree ChulsaGo/Info.plist
+
 
 
 #
 도커 로그 팔로우 (터미널 새창에서 실행 추천)
 docker logs -f --timestamps pyppeteer-service
 
-#도커 자체 로그 tail
-tail -f /var/log/dockerd.log
+
+//php 로그보기
+tail -f /var/log/php_errors.log
+
+
+
 
 
 
@@ -474,10 +485,10 @@ chargers_info = [
 
 -- 스크래핑 해온 html 데이터 중 변수값에 넣을 가이드
 # 제목 title(String)
-id="form" 아래 h4 태그의 아래의 span 태그를 제외한 text값
+id값이 form 아래에 id값이 stat_nm 인 부분의 value값
 
 # 충전기 업체명 company_name(String)
-org_me 클래스의 text값
+org_me 클래스의 span태그의 text값
 
 # 충전기 정보 값 chargers_info(jsonArray)
 type : class="table01" 아래의 tbody태그의 첫번째 td 태그의 text값
@@ -517,8 +528,8 @@ https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PL005189&pFlag=Y
 sid값은 get_ev_status.php 호출할때 파라미터로 넣은 sid값으로 지정해주고
 그런데 해당 스크래핑하는 목적지 url은 CSR 구조인지 url을 열고 조금 기다려야 html 소스가 모두 채워져
 그 내용이 다 채워지고 나면 스크래핑을 해서 반환해야해
+스크래핑할 내용이 있는지 체크하는 로직은 0.5초 단위로 최대 10회 정도 체크해보고 내가 가져올 title값이 존재하는걸로 판단해줘
 
-그리고 서비스 실행할때 해당 프로세스에 대한 tail 로그를 보는 방법도 알려주고
 그리고 도커 사용 하려고 해 컨테이너명은 pyppeteer-service 이걸로 하려고 해 전체 가이드 줘
 도커는 한번 실행되면 꺼지지 않고 계속 켜있어야해
 
@@ -529,7 +540,7 @@ sid값은 get_ev_status.php 호출할때 파라미터로 넣은 sid값으로 지
 
 -- 스크래핑 해온 html 데이터 중 변수값에 넣을 가이드
 # 제목 title(String)
-id="form" 아래 h4 태그의 아래의 span 태그를 제외한 text값
+id값이 form 아래에 id값이 stat_nm 인 부분의 value값
 
 # 충전기 업체명 company_name(String)
 org_me 클래스의 text값
@@ -571,6 +582,60 @@ Python 3.7.12
 Docker 19.03.9
 Mysql 5.1.73
 
+내 파일 정보야
+Dockerfile
+script.py
+get_ev_info.php
+
+
+내 기존 작성된 get_ev_info.php 파일의 소스 일부 보내줄께 # Docker 컨테이너 호출 부분부터 필요한 부분 알려줘주고
+그 외 나머지 파일들도 전체 소스 알려줘
+
+<?php
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+
+require_once __DIR__ . '/db_ev.php';
+require_once __DIR__ . '/check_access_ev.php';
+
+# send_status 함수 정의 (HTTP status 코드 설정, PHP 5.3.3 호환)
+function send_status($code) {
+    header("HTTP/1.1 $code");
+}
+
+# json_encode_utf8 함수 정의 (한글 이스케이프 제거, PHP 5.3.3 호환)
+function json_encode_utf8($data) {
+    $json = json_encode($data);
+    # \uXXXX를 실제 UTF-8 문자로 변환
+    return preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', function($match) {
+        return mb_convert_encoding(pack('H*', $match[1]), 'UTF-8', 'UCS-2BE');
+    }, $json);
+}
+
+function json_out($arr, $code=200) {
+    send_status($code);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode_utf8($arr);
+    exit;
+}
+
+$category = isset($_GET['category']) ? $_GET['category'] : '';
+$sid = isset($_GET['sid']) ? $_GET['sid'] : '';
+$key = isset($_GET['key']) ? $_GET['key'] : '';
+$log = isset($_GET['log']) ? $_GET['log'] : '0';
+
+# 사용자가 지정한 검증 로직
+if ($sid === '' || $category === '' || $key === '') {
+    json_out(array('error'=>'필수 파라미터 누락: sid, category, key','http_code'=>400),400);
+}
+$chk = check_access_inline_ev($category, $sid, $key, 'text');
+if ($chk !== 'access') {
+    json_out(array('error'=>$chk,'http_code'=>403),403);
+}
+
+# Docker 컨테이너 호출
+
+?>
 
 ###### GPT 문의 #####
 
@@ -597,10 +662,6 @@ url 서비스 호출시 log 태그가 1이면 프로세스 절차의 모든 상�
 
 서비스 url 호출 예시 (sid값은 바뀔 수 있음)
 http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II
-
-도커 로그가 같이 찍히는 서비스 url 호출 예시
-http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II&log=1
-
 
 
 도커 실행 후 로그 보는 예시인데 모든 상황이 다 여기에 찍혀야해 script.py는 무조건 디버그모드로 작동되게

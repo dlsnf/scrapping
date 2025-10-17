@@ -1,45 +1,31 @@
-FROM python:3.7.12-slim-buster
+# Python 3.7 기반 이미지 사용 (CentOS 6.10과 호환되도록 slim 버전)
+FROM python:3.7-slim-buster
 
-# 아카이브 저장소로 sources.list 수정 (Buster EOL 대응)
-RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list \
-    && sed -i 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' /etc/apt/sources.list \
-    && sed -i '/buster-updates/d' /etc/apt/sources.list \
-    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/10no-check-valid-until
+# 저장소 변경: archive.debian.org로 이동 (Buster EOL 대응)
+RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian buster-updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until && \
+    echo 'Acquire::Max-ValidTime 0;' > /etc/apt/apt.conf.d/99no-max-valid-time
 
-# 시스템 의존성 설치
-RUN apt-get update --allow-releaseinfo-change && apt-get install -y \
-    wget gnupg \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update --allow-releaseinfo-change \
-    && apt-get install -y google-chrome-stable \
+# 필요한 시스템 패키지 설치 (Pyppeteer가 Chromium 필요)
+RUN apt-get update && apt-get install -y \
+    wget unzip curl gnupg \
+    libnss3 libgconf-2-4 libxss1 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgbm1 libgcc1 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxtst6 xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Python 패키지 설치 (pip 업그레이드)
-RUN pip install --upgrade pip
-
-# Pyppeteer 설치 (Chromium 다운로드 스킵)
-ENV PYPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-RUN pip install pyppeteer==0.2.6
-
-# Flask 및 의존성 설치
-RUN pip install flask==1.1.4
-
-# MarkupSafe 다운그레이드 (Jinja2 호환)
-RUN pip install markupsafe==2.0.1
-
-# 기타 패키지
-RUN pip install beautifulsoup4==4.9.3
-RUN pip install pytz==2021.1
-
-# 작업 디렉토리
+# 작업 디렉토리 설정
 WORKDIR /app
 
-# 소스 복사 (script.py로 변경)
+# Python 라이브러리 설치
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Chromium 미리 다운로드 (빌드 타임에 실행)
+RUN python -c "import pyppeteer; pyppeteer.chromium_downloader.download_chromium()"
+
+# 스크립트 복사
 COPY script.py .
 
-# 포트 노출
-EXPOSE 8000
-
-# 서버 실행 (script.py로 변경)
+# Flask 서버 실행 (포트 5000)
 CMD ["python", "script.py"]
