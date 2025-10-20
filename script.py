@@ -6,30 +6,19 @@ from pyppeteer import launch
 from bs4 import BeautifulSoup
 import pytz
 from datetime import datetime
-import nest_asyncio
-nest_asyncio.apply()
+import logging
+
+# 로그 설정 (INFO 레벨, 시간 포함)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 
-# 브라우저 풀 (재사용 위해 전역)
-browser = None
-
-async def get_browser():
-    global browser
-    if browser is None or browser.process.poll() is not None:  # poll() not None = 종료됨
-        browser = await launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox'],
-            handleSIGINT=False,
-            handleSIGTERM=False,
-            handleSIGHUP=False
-        )
-    return browser
-
 async def scrape_ev_status(sid):
     start_time = time.time()
+    logging.info(f"스크래핑 시작: sid={sid}, start_time={start_time}")
     
-    # 새 브라우저 launch
+    # 브라우저 launch 시간 측정
+    launch_start = time.time()
     browser = await launch(
         headless=True,
         args=['--no-sandbox', '--disable-setuid-sandbox'],
@@ -37,28 +26,46 @@ async def scrape_ev_status(sid):
         handleSIGTERM=False,
         handleSIGHUP=False
     )
+    launch_end = time.time()
+    logging.info(f"브라우저 launch 완료: 소요 시간={launch_end - launch_start:.2f} 초")
+    
+    # 페이지 생성 시간 측정
+    page_start = time.time()
     page = await browser.newPage()
+    page_end = time.time()
+    logging.info(f"새 페이지 생성 완료: 소요 시간={page_end - page_start:.2f} 초")
     
     try:
-        # 대상 URL (타임아웃 60초)
+        # 페이지 로드 시간 측정
+        goto_start = time.time()
         url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
         await page.goto(url, {'timeout': 60000})
+        goto_end = time.time()
+        logging.info(f"페이지 로드 완료 (goto): 소요 시간={goto_end - goto_start:.2f} 초")
         
-        # 로딩 대기: 0.5초 간격으로 최대 10회, title 요소 체크
+        # 로딩 대기 루프 시간 측정
+        wait_start = time.time()
         title = None
-        for _ in range(10):
+        for attempt in range(10):
+            loop_start = time.time()
             content = await page.content()
             soup = BeautifulSoup(content, 'html.parser')
             title_input = soup.find('input', id='stat_nm')
             if title_input and title_input.get('value'):
                 title = title_input.get('value')
+                logging.info(f"Title 발견: 시도 {attempt+1}회, 소요 시간={time.time() - loop_start:.2f} 초")
                 break
+            logging.info(f"Title 미발견: 시도 {attempt+1}회, 소요 시간={time.time() - loop_start:.2f} 초, 0.5초 대기")
             await asyncio.sleep(0.5)
+        wait_end = time.time()
+        logging.info(f"로딩 대기 루프 완료: 총 소요 시간={wait_end - wait_start:.2f} 초")
         
         if not title:
+            logging.warning("Title 미발견: 10회 시도 후 실패")
             return {"msg": "FAIL: Title not found after 10 attempts"}
         
-        # HTML 파싱
+        # HTML 파싱 시간 측정
+        parse_start = time.time()
         soup = BeautifulSoup(await page.content(), 'html.parser')
         
         # title
@@ -78,16 +85,25 @@ async def scrape_ev_status(sid):
         if table:
             rows = table.find('tbody').find_all('tr')
             for row in rows:
+                row_start = time.time()
                 tds = row.find_all('td')
                 if len(tds) >= 3:
                     charger_type = tds[0].text.strip()
                     status_elem = tds[2].find(class_='state')
-                    status = status_elem.text.strip() if status_elem else ""
+                    raw_status = status_elem.text.strip() if status_elem else ""
+                    
+                    # status 조건 처리: "충전중" 포함 시 "충전중", "충전가능" 포함 시 "충전가능"
+                    if "충전중" in raw_status:
+                        status = "충전중"
+                    elif "충전가능" in raw_status:
+                        status = "충전가능"
+                    else:
+                        status = raw_status  # 다른 경우 원본 유지
                     
                     date_finish_elem = tds[2].find(class_='rdate')
                     date_finish = date_finish_elem.text.strip() if date_finish_elem else ""
                     
-                    # dateFinishInfo 계산 (서울 시간 기준)
+                    # dateFinishInfo 계산
                     date_finish_info = ""
                     if date_finish:
                         try:
@@ -101,10 +117,9 @@ async def scrape_ev_status(sid):
                             abs_hours = int(abs(total_sec) // 3600)
                             abs_minutes = int((abs(total_sec) % 3600) // 60)
                             
-                            if total_sec >= 0:
-                                date_finish_info = f"{abs_hours}시간 {abs_minutes}분"
-                            else:
-                                date_finish_info = f"{abs_hours}시간 {abs_minutes}분"
+                            if abs_hours > 0:
+                                date_finish_info += f"{abs_hours}시간 "
+                            date_finish_info += f"{abs_minutes}분"
                             
                             if status != "충전중":
                                 date_finish_info += " 전 종료"
@@ -117,6 +132,7 @@ async def scrape_ev_status(sid):
                         "dateFinish": date_finish,
                         "dateFinishInfo": date_finish_info
                     })
+                logging.info(f"충전기 정보 파싱: 행 처리 소요 시간={time.time() - row_start:.2f} 초")
         
         # total_chargers
         total_chargers = len(chargers_info)
@@ -133,8 +149,12 @@ async def scrape_ev_status(sid):
             print_string += f"{i}. {c['status']}({c['dateFinishInfo']}) / {c['type']}\n\n"
         print_string = print_string.strip()
         
+        parse_end = time.time()
+        logging.info(f"HTML 전체 파싱 완료: 소요 시간={parse_end - parse_start:.2f} 초")
+        
         # total_time
         total_time = f"{time.time() - start_time:.2f} seconds"
+        logging.info(f"스크래핑 전체 완료: 총 소요 시간={total_time}")
         
         return {
             "title": title,
@@ -150,7 +170,8 @@ async def scrape_ev_status(sid):
         }
     finally:
         await page.close()
-        await browser.close()  # 브라우저 완전 종료
+        await browser.close()
+        logging.info("브라우저 및 페이지 종료 완료")
 
 @app.route('/get_ev_status', methods=['GET'])
 def get_ev_status():

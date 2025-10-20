@@ -109,6 +109,11 @@ http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=
 //완속
 http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II
 
+//급속
+http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=ME20A171&key=IOVM13UY74
+
+
+
 
 
 //누리집 url
