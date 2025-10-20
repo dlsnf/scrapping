@@ -44,7 +44,7 @@ if ($chk !== 'access') {
 $api_url = "http://localhost:5000/get_ev_status?sid=" . urlencode($sid);
 $ch = curl_init($api_url);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_TIMEOUT, 30); // 타임아웃 30초 (필요 시 조정)
+curl_setopt($ch, CURLOPT_TIMEOUT, 60); // 타임아웃 30초 (필요 시 조정)
 $response = curl_exec($ch);
 $curl_error = curl_error($ch);
 curl_close($ch);

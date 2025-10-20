@@ -17,11 +17,11 @@ async def scrape_ev_status(sid):
     start_time = time.time()
     logging.info(f"스크래핑 시작: sid={sid}, start_time={start_time}")
     
-    # 브라우저 launch 시간 측정
+    # 브라우저 launch 시간 측정 (최적 args 추가)
     launch_start = time.time()
     browser = await launch(
         headless=True,
-        args=['--no-sandbox', '--disable-setuid-sandbox'],
+        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-software-rasterizer', '--single-process'],
         handleSIGINT=False,
         handleSIGTERM=False,
         handleSIGHUP=False
@@ -36,10 +36,20 @@ async def scrape_ev_status(sid):
     logging.info(f"새 페이지 생성 완료: 소요 시간={page_end - page_start:.2f} 초")
     
     try:
-        # 페이지 로드 시간 측정
+        # 리소스 블록 (이미지, CSS, 폰트 차단)
+        await page.setRequestInterception(True)
+        page.on('request', lambda req: asyncio.ensure_future(intercept_request(req)))
+
+        async def intercept_request(req):
+            if req.resourceType in ['image', 'stylesheet', 'font']:  # () 제거: resourceType은 속성
+                await req.abort()
+            else:
+                await req.continue_()
+        
+        # 페이지 로드 시간 측정 (waitUntil 최적화, timeout 증가)
         goto_start = time.time()
         url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
-        await page.goto(url, {'timeout': 60000})
+        await page.goto(url, {'waitUntil': 'domcontentloaded', 'timeout': 90000})  # HTML 로드 후 중지, 90초 타임아웃
         goto_end = time.time()
         logging.info(f"페이지 로드 완료 (goto): 소요 시간={goto_end - goto_start:.2f} 초")
         
@@ -117,9 +127,12 @@ async def scrape_ev_status(sid):
                             abs_hours = int(abs(total_sec) // 3600)
                             abs_minutes = int((abs(total_sec) % 3600) // 60)
                             
+                            time_str = ""
                             if abs_hours > 0:
-                                date_finish_info += f"{abs_hours}시간 "
-                            date_finish_info += f"{abs_minutes}분"
+                                time_str += f"{abs_hours}시간 "
+                            time_str += f"{abs_minutes}분"
+                            
+                            date_finish_info = time_str
                             
                             if status != "충전중":
                                 date_finish_info += " 전 종료"
