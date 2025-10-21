@@ -7,11 +7,15 @@ from bs4 import BeautifulSoup
 import pytz
 from datetime import datetime
 import logging
+import nest_asyncio  # 추가: 중첩 루프 허용
 
 # 로그 설정 (INFO 레벨, 시간 포함)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
+
+# nest_asyncio 적용 (asyncio 루프 불일치 해결)
+nest_asyncio.apply()
 
 async def scrape_ev_status(sid):
     start_time = time.time()
@@ -41,7 +45,7 @@ async def scrape_ev_status(sid):
         page.on('request', lambda req: asyncio.ensure_future(intercept_request(req)))
 
         async def intercept_request(req):
-            if req.resourceType in ['image', 'stylesheet', 'font']:  # () 제거: resourceType은 속성
+            if req.resourceType in ['image', 'stylesheet', 'font']:
                 await req.abort()
             else:
                 await req.continue_()
@@ -199,4 +203,3 @@ def get_ev_status():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-    
