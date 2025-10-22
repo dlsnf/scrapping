@@ -165,12 +165,35 @@ docker exec -it pyppeteer-service \python /app/script.py --sid PL005189 --log
 # 1) 컨테이너 내리기
 docker stop pyppeteer-service && docker rm pyppeteer-service
 
+
+# 불필요한 컨테이너/이미지 정리 이거 하나면 됨!!
+docker system prune -af
+
+
 # 2) 이미지 빌드
 docker build --no-cache -t pyppeteer-service:latest .
 
 
 # 3) 컨테이너 실행
-docker run -d --name pyppeteer-service -p 5000:5000 --restart always pyppeteer-service:latest
+docker run -d --name pyppeteer-service -p 5000:5000 --restart always --memory=512m --memory-swap=512m pyppeteer-service:latest
+
+
+#
+도커 로그 팔로우 (터미널 새창에서 실행 추천)
+docker logs -f --timestamps pyppeteer-service
+
+
+//php 로그보기
+tail -f /var/log/php_errors.log
+
+
+
+
+
+
+
+
+
 
 
 //누적된 크롬 kill
@@ -187,8 +210,6 @@ curl -v --http1.0 -H "Connection: close" "http://127.0.0.1:5000/info?sid=PL00518
 
 
 
-불필요한 컨테이너/이미지 정리 이거 하나면 됨!!
-docker system prune -af
 
 
 //터미널 모든 내용 지우기
@@ -202,16 +223,6 @@ clear && printf '\e[3J'
 git update-index --assume-unchanged ChulsaGo/AppDelegate.swift
 
 git update-index --skip-worktree ChulsaGo/Info.plist
-
-
-
-#
-도커 로그 팔로우 (터미널 새창에서 실행 추천)
-docker logs -f --timestamps pyppeteer-service
-
-
-//php 로그보기
-tail -f /var/log/php_errors.log
 
 
 
@@ -527,7 +538,7 @@ chargers_info 의 갯수별로 번호를 적어서 함
 ###### GPT 문의 2 #####
 
 내 서버에 php 파일을 호출하여 원하는 데이터를 반환할꺼야 차근차근 해보자
-호출 url은 http://hansbuild.cafe24.com/scrapping/get_ev_status.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II&log=1 이것이고
+호출 url은 http://hansbuild.cafe24.com/scrapping/get_ev_status.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II 이것이고
 해당 url을 호출하면 데이터를 가져와야하는데 어떤 데이터를 가져올거냐면
 https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PL005189&pFlag=Y
 이 주소를 호출했을때 나오는 html 소스를 스크래핑하여 값을 반환할꺼야
@@ -591,6 +602,7 @@ Mysql 5.1.73
 내 파일 정보야
 Dockerfile
 script.py
+requirements.txt
 get_ev_info.php
 
 

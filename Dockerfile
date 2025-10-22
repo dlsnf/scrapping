@@ -27,5 +27,5 @@ RUN python -c "import pyppeteer; pyppeteer.chromium_downloader.download_chromium
 # 스크립트 복사
 COPY script.py .
 
-# 기존 Flask 개발 서버로 실행 (포트 5000)
+# Flask 서버 실행 (포트 5000)
 CMD ["python", "script.py"]

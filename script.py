@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import pytz
 from datetime import datetime
 import logging
-import nest_asyncio  # 추가: 중첩 루프 허용
+import nest_asyncio
 
 # 로그 설정 (INFO 레벨, 시간 포함)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
