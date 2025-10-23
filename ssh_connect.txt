@@ -538,11 +538,11 @@ chargers_info 의 갯수별로 번호를 적어서 함
 ###### GPT 문의 2 #####
 
 내 서버에 php 파일을 호출하여 원하는 데이터를 반환할꺼야 차근차근 해보자
-호출 url은 http://hansbuild.cafe24.com/scrapping/get_ev_status.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II 이것이고
+호출 url은 http://hansbuild.cafe24.com/scrapping/get_ev_info.php?category=scrapping_ev&sid=PL005189&key=KBKARPB6II 이것이고
 해당 url을 호출하면 데이터를 가져와야하는데 어떤 데이터를 가져올거냐면
 https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid=PL005189&pFlag=Y
 이 주소를 호출했을때 나오는 html 소스를 스크래핑하여 값을 반환할꺼야
-sid값은 get_ev_status.php 호출할때 파라미터로 넣은 sid값으로 지정해주고
+sid값은 get_ev_info.php 호출할때 파라미터로 넣은 sid값으로 지정해주고
 그런데 해당 스크래핑하는 목적지 url은 CSR 구조인지 url을 열고 조금 기다려야 html 소스가 모두 채워져
 그 내용이 다 채워지고 나면 스크래핑을 해서 반환해야해
 스크래핑할 내용이 있는지 체크하는 로직은 0.5초 단위로 최대 10회 정도 체크해보고 내가 가져올 title값이 존재하는걸로 판단해줘
