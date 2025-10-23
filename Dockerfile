@@ -1,5 +1,5 @@
-# Python 3.7 기반 이미지 사용 (CentOS 6.10과 호환되도록 slim 버전)
-FROM python:3.7-slim-buster
+# Python 3.8 기반 이미지 사용 (CentOS 6.10과 호환되도록 slim 버전)
+FROM python:3.8-slim-buster
 
 # 저장소 변경: archive.debian.org로 이동 (Buster EOL 대응)
 RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
@@ -27,5 +27,5 @@ RUN python -c "import pyppeteer; pyppeteer.chromium_downloader.download_chromium
 # 스크립트 복사
 COPY script.py .
 
-# Flask 서버 실행 (포트 5000)
-CMD ["python", "script.py"]
+# Hypercorn으로 실행 (워커 1개로 제한, 루프 충돌 방지)
+CMD ["hypercorn", "--workers", "1", "--bind", "0.0.0.0:5000", "script:app"]
