@@ -1,6 +1,13 @@
 # Python 3.8 기반 이미지 사용 (CentOS 6.10과 호환되도록 slim 버전)
 FROM python:3.8-slim-buster
 
+
+# 한국 시간대로 강제 고정 (이 3줄만 추가하면 끝!)
+ENV TZ=Asia/Seoul
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
+
+    
 # 저장소 변경: archive.debian.org로 이동 (Buster EOL 대응)
 RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
     echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
