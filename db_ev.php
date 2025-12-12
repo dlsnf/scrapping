@@ -12,6 +12,7 @@ if (!defined('EV_DB_USER')) define('EV_DB_USER', '');   // ← 원하는 전용 
 if (!defined('EV_DB_PASS')) define('EV_DB_PASS', '');          // ← 원하는 전용 비밀번호
 if (!defined('EV_DB_NAME')) define('EV_DB_NAME', 'scrapping');         // ← DB명
 
+
 /* ===== 안전 비교(폴리필) ===== */
 if (!function_exists('hash_equals')) {
 /**
