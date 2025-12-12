@@ -9,12 +9,18 @@ $action = isset($_REQUEST['action']) ? $_REQUEST['action'] : 'list';
 
 // 공통으로 쓰는 정렬 유틸(화살표)
 if (!function_exists('icon_dir')) {
+/**
+ * @return mixed
+ */
     function icon_dir($col, $sort, $dir){
         if ($col !== $sort) return '';
         return ($dir === 'ASC') ? '↑' : '↓';
     }
 }
 if (!function_exists('next_dir')) {
+/**
+ * @return mixed
+ */
     function next_dir($dir){ return ($dir === 'ASC') ? 'DESC' : 'ASC'; }
 }
 

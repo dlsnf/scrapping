@@ -1,6 +1,9 @@
 <?php
 
 /* ---------- 공통 유틸 ---------- */
+/**
+ * @return mixed
+ */
 function send_status($code) {
     $texts = array(
         200=>'OK', 204=>'No Content', 400=>'Bad Request', 403=>'Forbidden',
@@ -12,6 +15,9 @@ function send_status($code) {
     header($proto . ' ' . $code . ' ' . $text);
 }
 
+/**
+ * @return mixed
+ */
 function json_out($arr, $code=200) {
     send_status($code);
     header('Content-Type: application/json; charset=utf-8');
@@ -22,6 +28,9 @@ function json_out($arr, $code=200) {
 }
 
 // 멀티바이트 안전 substr (mbstring 없으면 best-effort)
+/**
+ * @return mixed
+ */
 function safe_substr($s, $len) {
     if (function_exists('mb_substr')) return mb_substr($s, 0, $len, 'UTF-8');
     return substr($s, 0, $len);

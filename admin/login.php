@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__.'/functions.php';
 require_once __DIR__.'/auth.php';
-session_name(SESSION_NAME);
-session_start();
 
 $err = '';
 

@@ -1,16 +1,22 @@
 <?php
 error_reporting(E_ALL);
-ini_set('display_errors', 0);
+ini_set('display_errors', '0');
 
 require_once __DIR__ . '/db_ev.php';
 require_once __DIR__ . '/check_access_ev.php';
 
 # send_status 함수 정의 (HTTP status 코드 설정, PHP 5.3.3 호환)
+/**
+ * @return mixed
+ */
 function send_status($code) {
     header("HTTP/1.1 $code");
 }
 
 # json_encode_utf8 함수 정의 (한글 이스케이프 제거, PHP 5.3.3 호환)
+/**
+ * @return mixed
+ */
 function json_encode_utf8($data) {
     $json = json_encode($data);
     # \uXXXX를 실제 UTF-8 문자로 변환
@@ -19,6 +25,9 @@ function json_encode_utf8($data) {
     }, $json);
 }
 
+/**
+ * @return mixed
+ */
 function json_out($arr, $code=200) {
     send_status($code);
     header('Content-Type: application/json; charset=utf-8');

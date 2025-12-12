@@ -15,6 +15,9 @@ require_once __DIR__.'/config.php';
 /* -----------------------------------------
  * 연결 (싱글톤)
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function db()
 {
     static $mysqli = null;
@@ -43,6 +46,9 @@ function db()
     return $mysqli;
 }
 
+/**
+ * @return mixed
+ */
 function db_close()
 {
     $m = db();
@@ -52,6 +58,9 @@ function db_close()
 /* -----------------------------------------
  * 트랜잭션
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function db_begin()
 {
     $m = db();
@@ -59,12 +68,18 @@ function db_begin()
         throw new Exception('DB autocommit(false) 실패: '.$m->error);
     }
 }
+/**
+ * @return mixed
+ */
 function db_commit()
 {
     $m = db();
     if ($m->commit() === false) throw new Exception('DB COMMIT 실패: '.$m->error);
     $m->autocommit(true);
 }
+/**
+ * @return mixed
+ */
 function db_rollback()
 {
     $m = db();
@@ -77,6 +92,9 @@ function db_rollback()
  *  - $types: 'sii' 같은 문자열 또는 null
  *  - $params: array(...) 또는 null
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function _db_prepare_bind($sql, $types = null, $params = null)
 {
     $m = db();
@@ -114,6 +132,9 @@ function _db_prepare_bind($sql, $types = null, $params = null)
 /* -----------------------------------------
  * 내부: 결과 바인딩 유틸 (mysqlnd 불필요)
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function _stmt_bind_assoc(mysqli_stmt $stmt, &$row, &$binds)
 {
     $meta = $stmt->result_metadata();
@@ -133,6 +154,9 @@ function _stmt_bind_assoc(mysqli_stmt $stmt, &$row, &$binds)
  * SELECT 한 행
  *  - $throw=true 면 결과 없을 때 예외
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function db_one($sql, $types = null, $params = null, $throw = false)
 {
     $stmt = _db_prepare_bind($sql, $types, $params);
@@ -157,6 +181,9 @@ function db_one($sql, $types = null, $params = null, $throw = false)
 /* -----------------------------------------
  * SELECT 여러 행
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function db_all($sql, $types = null, $params = null)
 {
     $stmt = _db_prepare_bind($sql, $types, $params);
@@ -181,6 +208,9 @@ function db_all($sql, $types = null, $params = null)
 /* -----------------------------------------
  * INSERT / UPDATE / DELETE
  * ----------------------------------------- */
+/**
+ * @return mixed
+ */
 function db_exec($sql, $types = null, $params = null)
 {
     $stmt = _db_prepare_bind($sql, $types, $params);
@@ -189,6 +219,9 @@ function db_exec($sql, $types = null, $params = null)
     return $affected;
 }
 
+/**
+ * @return mixed
+ */
 function db_insert_id()
 {
     return db()->insert_id;
@@ -198,6 +231,9 @@ function db_insert_id()
 
 
 if (!function_exists('hash_equals')) {
+/**
+ * @return mixed
+ */
     function hash_equals($a, $b){
         $a = (string)$a; $b = (string)$b;
         if (strlen($a) !== strlen($b)) return false;

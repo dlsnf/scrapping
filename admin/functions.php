@@ -3,6 +3,9 @@ require_once __DIR__.'/db.php';
 
 /* PHP 5.3에는 hash_equals() 없음 → 폴리필 */
 if (!function_exists('hash_equals')) {
+/**
+ * @return mixed
+ */
     function hash_equals($known_string, $user_string) {
         if (!is_string($known_string) || !is_string($user_string)) {
             return false;
@@ -20,15 +23,27 @@ if (!function_exists('hash_equals')) {
 }
 
 /* 기본 출력 */
-function h($s){ return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
+/**
+ * @return mixed
+ */
+function h($s){
+    // Allow null inputs (legacy code may pass null); cast to string to avoid PHP8 deprecation
+    return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+}
 
 /* CSRF */
+/**
+ * @return mixed
+ */
 function csrf_token() {
     if (empty($_SESSION[CSRF_TOKEN_NAME])) {
         $_SESSION[CSRF_TOKEN_NAME] = bin2hex(rand_bytes(16));
     }
     return $_SESSION[CSRF_TOKEN_NAME];
 }
+/**
+ * @return mixed
+ */
 function csrf_check() {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $t = isset($_POST[CSRF_TOKEN_NAME]) ? $_POST[CSRF_TOKEN_NAME] : '';
@@ -44,6 +59,9 @@ function csrf_check() {
  * 랜덤 / UUID / 안전 비교 (구버전 호환)
  * ----------------------------------------- */
 if (!function_exists('rand_bytes')) {
+/**
+ * @return mixed
+ */
     function rand_bytes($len)
     {
         if (function_exists('openssl_random_pseudo_bytes')) {
@@ -59,6 +77,9 @@ if (!function_exists('rand_bytes')) {
 }
 
 if (!function_exists('uuid_v4')) {
+/**
+ * @return mixed
+ */
     function uuid_v4()
     {
         $data = rand_bytes(16);
@@ -73,12 +94,18 @@ if (!function_exists('uuid_v4')) {
 }
 
 /* SHA-256 + salt + 반복(레거시 환경용) */
+/**
+ * @return mixed
+ */
 function password_hash_legacy($password, $salt=null, $iter=8000) {
     if ($salt===null) $salt = bin2hex(rand_bytes(16));
     $h = hash('sha256', $salt.$password, true);
     for ($i=0; $i<$iter; $i++) $h = hash('sha256', $h.$password, true);
     return $salt.':'.$iter.':'.bin2hex($h);
 }
+/**
+ * @return mixed
+ */
 function password_verify_legacy($password, $stored) {
     $parts = explode(':', $stored);
     if (count($parts) !== 3) return false;
@@ -89,6 +116,9 @@ function password_verify_legacy($password, $stored) {
 
 
 /* 10자리 라이선스 키 (A-Z0-9) */
+/**
+ * @return mixed
+ */
 function generate_license_key($len=10){
     $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     $out = '';
@@ -97,6 +127,9 @@ function generate_license_key($len=10){
 }
 
 /* 감사 로그 기록 */
+/**
+ * @return mixed
+ */
 function log_event($license_id, $type, $actor_admin_id, $actor, $request_ip, $before=null, $after=null){
     $sql = "INSERT INTO license_events
         (license_id, event_type, actor_admin_id, actor, request_ip, `before`, `after`)
@@ -107,6 +140,9 @@ function log_event($license_id, $type, $actor_admin_id, $actor, $request_ip, $be
 }
 
 /* 페이지 공통 헤더/푸터 */
+/**
+ * @return mixed
+ */
 function render_header($title, $user=null){
     echo '<!doctype html><html><head><meta charset="utf-8">';
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
@@ -163,6 +199,9 @@ function render_header($title, $user=null){
 }
 
 
+/**
+ * @return mixed
+ */
 function render_footer(){
     echo '</div></main>';
     // footer를 쓰고 싶으면 여기에 추가 가능: echo '<footer class="container muted">© '.date('Y').'</footer>';
@@ -171,6 +210,9 @@ function render_footer(){
 
 
 /* --- 정렬 도우미: ORDER BY 구문 만들기 --- */
+/**
+ * @return mixed
+ */
 function get_sort_sql($allowed, $default_col, $default_dir){
     $sort = isset($_GET['sort']) ? $_GET['sort'] : $default_col;
     $dir  = isset($_GET['dir']) ? strtoupper($_GET['dir']) : $default_dir;
@@ -180,6 +222,9 @@ function get_sort_sql($allowed, $default_col, $default_dir){
 }
 
 /* --- 정렬 링크(↑/↓) --- */
+/**
+ * @return mixed
+ */
 function sort_link($title, $key, $base=''){
     if ($base==='') {
         // 호출 파일명을 자동 추정
@@ -200,6 +245,9 @@ function sort_link($title, $key, $base=''){
     return '<a href="'.h($base).'?'.implode('&',$q).'">'.h($title).$arrow.'</a>';
 }
 
+/**
+ * @return mixed
+ */
 function flash_render() {
     if (!session_id()) session_start();
     if (!empty($_SESSION['flash'])) {
@@ -213,6 +261,9 @@ function flash_render() {
     }
 }
 
+/**
+ * @return mixed
+ */
 function redirect_with($url, $msg, $type='ok') {
     if (!session_id()) session_start();
     if (!isset($_SESSION['flash'])) $_SESSION['flash'] = array();

@@ -172,6 +172,9 @@ if (function_exists('flash_render')) { flash_render(); } ?>
     echo "var CUR_CUST = ".json_encode($r['customer_id']).";\n";
   ?>
 
+/**
+ * @return mixed
+ */
   function fillSelectProducts(sel, items, current){
     while (sel.options.length) sel.remove(0);
     for (var i=0;i<items.length;i++){
@@ -183,6 +186,9 @@ if (function_exists('flash_render')) { flash_render(); } ?>
       sel.appendChild(opt);
     }
   }
+/**
+ * @return mixed
+ */
   function fillSelectCustomers(sel, items, current){
     while (sel.options.length) sel.remove(0);
     for (var i=0;i<items.length;i++){
@@ -195,6 +201,9 @@ if (function_exists('flash_render')) { flash_render(); } ?>
     }
   }
 
+/**
+ * @return mixed
+ */
   function refreshLists(){
     var cat = document.getElementById('f_category').value;
     var pSel = document.getElementById('f_product');

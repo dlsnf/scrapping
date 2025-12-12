@@ -8,6 +8,9 @@
 require_once __DIR__ . '/db_ev.php';
 
 if (!function_exists('check_access_inline_ev')) {
+/**
+ * @return mixed
+ */
 function check_access_inline_ev($category, $product, $key, $format /* 'text' 또는 'json' */)
 {
     $category = trim($category);

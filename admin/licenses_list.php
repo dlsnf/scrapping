@@ -105,6 +105,9 @@ if (function_exists('flash_render')) { flash_render(); }
   <thead>
     <tr>
       <?php
+/**
+ * @return mixed
+ */
         function HREF_S($col, $title, $sort, $dir, $q){
             $nd = ($sort===$col ? next_dir($dir) : 'ASC');
             $q['sort']=$col; $q['dir']=$nd;
@@ -173,6 +176,9 @@ if (function_exists('flash_render')) { flash_render(); }
     echo "var CUR_CUST = ".json_encode($customer_id).";\n";
   ?>
 
+/**
+ * @return mixed
+ */
   function fillSelectProducts(sel, items, cur){
     while (sel.options.length) sel.remove(0);
     var o0 = document.createElement('option'); o0.value=''; o0.text='-- 전체 --'; sel.appendChild(o0);
@@ -185,6 +191,9 @@ if (function_exists('flash_render')) { flash_render(); }
       sel.appendChild(op);
     }
   }
+/**
+ * @return mixed
+ */
   function fillSelectCustomers(sel, items, cur){
     while (sel.options.length) sel.remove(0);
     var o0 = document.createElement('option'); o0.value=''; o0.text='-- 전체 --'; sel.appendChild(o0);
@@ -202,6 +211,9 @@ if (function_exists('flash_render')) { flash_render(); }
   var pSel   = document.getElementById('f_prod');
   var cSel   = document.getElementById('f_cust');
 
+/**
+ * @return mixed
+ */
   function refresh(){
     var cat = catSel.value || null;
     var prods = PRODUCTS_BY_CAT[cat] || [];

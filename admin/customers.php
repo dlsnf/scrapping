@@ -7,17 +7,26 @@ require_once __DIR__.'/functions.php';
 
 /* ============ 공통 유틸 ============ */
 if (!function_exists('icon_dir')) {
+/**
+ * @return mixed
+ */
     function icon_dir($col, $sort, $dir){
         if ($col !== $sort) return '';
         return ($dir === 'ASC') ? '↑' : '↓';
     }
 }
 if (!function_exists('next_dir')) {
+/**
+ * @return mixed
+ */
     function next_dir($dir){ return ($dir === 'ASC') ? 'DESC' : 'ASC'; }
 }
 
 /* ============ 관리자 비번 검증 유틸 (products.php 동일) ============ */
 if (!function_exists('hash_equals_safe')) {
+/**
+ * @return mixed
+ */
     function hash_equals_safe($a, $b){
         if (function_exists('hash_equals')) return hash_equals($a,$b);
         $a = (string)$a; $b = (string)$b;
@@ -28,6 +37,9 @@ if (!function_exists('hash_equals_safe')) {
     }
 }
 if (!function_exists('verify_with_hash')) {
+/**
+ * @return mixed
+ */
     function verify_with_hash($plain, $stored){
         $stored = (string)$stored;
         if (strpos($stored, '$2') === 0) {
@@ -46,6 +58,9 @@ if (!function_exists('verify_with_hash')) {
     }
 }
 if (!function_exists('require_admin_password_or_alert')) {
+/**
+ * @return mixed
+ */
     function require_admin_password_or_alert($plain){
         $me = current_admin();
         if (!$me) {
@@ -107,6 +122,9 @@ switch ($action) {
 exit;
 
 /* ============ 목록 ============ */
+/**
+ * @return mixed
+ */
 function customers_list(){
     $me = current_admin();
 
@@ -160,6 +178,9 @@ function customers_list(){
         <tr>
           <?php
             $q = $_GET;
+/**
+ * @return mixed
+ */
             function THC($col, $title, $sort, $dir, $q){
                 $nd = ($sort===$col ? next_dir($dir) : 'ASC');
                 $q['sort']=$col; $q['dir']=$nd;
@@ -203,6 +224,9 @@ function customers_list(){
 }
 
 /* ============ 등록 ============ */
+/**
+ * @return mixed
+ */
 function customers_new(){
     $me = current_admin();
     $categories = db_all("SELECT id, name FROM categories ORDER BY name ASC");
@@ -278,6 +302,9 @@ function customers_new(){
 }
 
 /* ============ 보기/수정 ============ */
+/**
+ * @return mixed
+ */
 function customers_view(){
     $me = current_admin();
     $id = isset($_GET['id']) ? trim($_GET['id']) : '';
@@ -348,6 +375,9 @@ function customers_view(){
 }
 
 /* ============ 저장 ============ */
+/**
+ * @return mixed
+ */
 function customers_save(){
     $id          = isset($_POST['id']) ? trim($_POST['id']) : '';
     $category_id = isset($_POST['category_id']) ? trim($_POST['category_id']) : '';
@@ -369,6 +399,9 @@ function customers_save(){
 }
 
 /* ============ 삭제(관리자 비번 확인 + 참조 검사) ============ */
+/**
+ * @return mixed
+ */
 function customers_delete(){
     $id   = isset($_POST['id']) ? trim($_POST['id']) : '';
     $pass = isset($_POST['admin_password']) ? (string)$_POST['admin_password'] : '';

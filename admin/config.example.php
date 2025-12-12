@@ -12,5 +12,5 @@ define('SESSION_NAME', 'licadmin_sess');
 define('CSRF_TOKEN_NAME', 'csrf_token');
 
 /* PHP 5.3에서 에러 표시(운영시 off 권장) */
-ini_set('display_errors', 1);
+ini_set('display_errors', '1');
 error_reporting(E_ALL & ~E_NOTICE);

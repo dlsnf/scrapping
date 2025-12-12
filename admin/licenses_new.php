@@ -31,12 +31,18 @@ $form = array(
 $error_msg = '';
 
 // 랜덤 키 생성기(10자리 A-Z0-9)
+/**
+ * @return mixed
+ */
 function _gen_key10() {
     $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     $out = '';
     for ($i=0; $i<10; $i++) { $out .= $chars[mt_rand(0, strlen($chars)-1)]; }
     return $out;
 }
+/**
+ * @return mixed
+ */
 function _generate_unique_key() {
     for ($i=0; $i<50; $i++) {
         $k = _gen_key10();
@@ -234,6 +240,9 @@ if ($error_msg!=='') {
   var CUR_PROD  = <?php echo json_encode($form['product_id']); ?>;
   var CUR_CUST  = <?php echo json_encode($form['customer_id']); ?>;
 
+/**
+ * @return mixed
+ */
   function filterByCat(items, catId, keyCat){
     var out = [];
     for (var i=0;i<items.length;i++){
@@ -241,6 +250,9 @@ if ($error_msg!=='') {
     }
     return out;
   }
+/**
+ * @return mixed
+ */
   function fillProducts(sel, list, current){
     while(sel.options.length) sel.remove(0);
     for (var i=0;i<list.length;i++){
@@ -252,6 +264,9 @@ if ($error_msg!=='') {
       sel.appendChild(o);
     }
   }
+/**
+ * @return mixed
+ */
   function fillCustomers(sel, list, current){
     while(sel.options.length) sel.remove(0);
     for (var i=0;i<list.length;i++){
@@ -268,6 +283,9 @@ if ($error_msg!=='') {
   var pSel   = document.getElementById('n_product');
   var cSel   = document.getElementById('n_customer');
 
+/**
+ * @return mixed
+ */
   function refresh(){
     var cat = catSel.value || null;
     var ps = cat ? filterByCat(PRODUCTS,  cat, 'category_id') : [];

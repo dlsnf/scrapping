@@ -9,6 +9,9 @@ csrf_check();
 $action = isset($_GET['action']) ? $_GET['action'] : 'list';
 $id     = isset($_GET['id']) ? $_GET['id'] : null;
 
+/**
+ * @return mixed
+ */
 function get_category($id){
     return db_one("SELECT * FROM categories WHERE id=?", 's', array($id));
 }

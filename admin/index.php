@@ -4,6 +4,9 @@ require_login();
 $me = current_admin();
 
 /* ---------- 간단 카운트 헬퍼 (PHP 5.3 호환) ---------- */
+/**
+ * @return mixed
+ */
 function cnt($sql){
     $r = db_one($sql);
     return isset($r['c']) ? (int)$r['c'] : 0;
