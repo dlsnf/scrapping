@@ -2,8 +2,7 @@ import asyncio
 import time
 import json
 from quart import Quart, request, jsonify
-from pyppeteer import launch
-from pyppeteer.errors import TimeoutError
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 import pytz
 from datetime import datetime
@@ -18,60 +17,70 @@ app = Quart(__name__)
 # nest_asyncio 적용
 nest_asyncio.apply()
 
-# 글로벌 브라우저 변수 (각 워커별)
+# 글로벌 브라우저/컨텍스트 변수
 browser = None
+context = None
 
 @app.before_serving
 async def init_browser():
-    global browser
-    logging.info("브라우저 초기화 시작 (워커별)")
+    global browser, context
+    logging.info("브라우저 초기화 시작 (Playwright + Firefox, 워커별)")
     start_time = time.time()
-    browser = await launch(
+    
+    # Playwright 실행
+    playwright = await async_playwright().start()
+    browser = await playwright.firefox.launch(
         headless=True,
-        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-software-rasterizer', '--single-process'],
-        handleSIGINT=False,
-        handleSIGTERM=False,
-        handleSIGHUP=False
+        args=['--no-sandbox']
     )
+    
+    # 컨텍스트 생성 (리소스 최적화)
+    context = await browser.new_context(
+        ignore_https_errors=True
+    )
+    
     logging.info(f"브라우저 초기화 완료: 소요 시간={time.time() - start_time:.2f} 초")
 
 @app.after_serving
 async def shutdown_browser():
-    global browser
+    global browser, context
+    if context:
+        await context.close()
+        logging.info("컨텍스트 종료 완료")
     if browser:
         await browser.close()
         logging.info("브라우저 종료 완료")
 
 async def scrape_ev_status(sid):
-    global browser
+    global context
     start_time = time.time()
     logging.info(f"스크래핑 시작: sid={sid}, start_time={start_time}")
     
-    if browser is None:
-        logging.error("브라우저가 초기화되지 않았습니다. 재시도 중...")
-        await init_browser()
+    if context is None:
+        logging.error("컨텍스트가 초기화되지 않았습니다.")
+        return {"msg": "FAIL: Context not initialized"}
     
     # 재시도 로직: 최대 2회
     for attempt in range(2):
         try:
             page_start = time.time()
-            page = await browser.newPage()
+            page = await context.new_page()
             page_end = time.time()
             logging.info(f"새 페이지 생성 완료: 소요 시간={page_end - page_start:.2f} 초")
             
             try:
-                await page.setRequestInterception(True)
-                page.on('request', lambda req: asyncio.ensure_future(intercept_request(req)))
-
-                async def intercept_request(req):
-                    if req.resourceType in ['image', 'stylesheet', 'font']:
-                        await req.abort()
+                # Playwright에서 리소스 차단 (이미지, 스타일시트, 폰트)
+                async def handle_route(route):
+                    if route.request.resource_type in ['image', 'stylesheet', 'font']:
+                        await route.abort()
                     else:
-                        await req.continue_()
+                        await route.continue_()
+                
+                await page.route('**/*', handle_route)
                 
                 goto_start = time.time()
                 url = f"https://www.ev.or.kr/nportal/monitor/evMapInfo.do?sid={sid}&pFlag=Y"
-                await page.goto(url, {'waitUntil': 'domcontentloaded', 'timeout': 30000})
+                await page.goto(url, wait_until='domcontentloaded', timeout=30000)
                 goto_end = time.time()
                 logging.info(f"페이지 로드 완료 (goto): 소요 시간={goto_end - goto_start:.2f} 초")
                 
@@ -196,18 +205,14 @@ async def scrape_ev_status(sid):
             
             break
         
-        except TimeoutError as e:
-            logging.warning(f"타임아웃 발생 (시도 {attempt+1}회): {str(e)}")
-            if attempt == 0:
+        except Exception as e:
+            logging.warning(f"오류 발생 (시도 {attempt+1}회): {str(e)}")
+            if attempt < 1:
                 await asyncio.sleep(1)
-                if browser:
-                    await browser.close()
-                    browser = None
-                    await init_browser()
             else:
-                return {"msg": f"FAIL: Timeout after retry - {str(e)}"}
+                return {"msg": f"FAIL: Error after retry - {str(e)}"}
     
-    logging.info("브라우저는 유지됨 (재사용 준비)")
+    logging.info("페이지는 종료됨 (새 페이지로 재사용 준비)")
 
 @app.route('/get_ev_status', methods=['GET'])
 async def get_ev_status():

@@ -46,9 +46,22 @@ function check_access_inline_ev($category, $product, $key, $format /* 'text' 또
     }
 
     // 2) 1초 중복 요청 차단
+    // 주의: DB의 시간(NOW())와 PHP의 time()이 서버 간 또는 설정 차이로 불일치할 수 있음.
+    // DB 시간이 PHP 시간보다 미래인 경우(now - last < 0)가 되어 의도치 않게 차단이 계속 발생할 수 있다.
+    // 따라서 strtotime 결과가 PHP 현재 시간보다 미래인 경우에는 중복 체크에서 제외하도록 안전하게 처리.
     $now = time();
-    $last = $row['last_request_at'] ? strtotime($row['last_request_at']) : 0;
-    if ($last && ($now - $last) < 1) {
+    $last_ts = 0;
+    if (!empty($row['last_request_at'])) {
+        $t = strtotime($row['last_request_at']);
+        if ($t !== false && $t <= $now) {
+            $last_ts = $t;
+        } else {
+            // DB 시간이 PHP 시간보다 앞선(미래) 경우 로그에 남기기(운영시 주석 처리 가능)
+            // error_log("check_access_ev: ignoring future DB time: {$row['last_request_at']}");
+            $last_ts = 0;
+        }
+    }
+    if ($last_ts && ($now - $last_ts) < 1) {
         return '잠시 후 다시 시도해 주세요.';
     }
 
